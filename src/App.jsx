@@ -82,8 +82,8 @@ function cardId(rank, suit) {
 }
 
 function cardImage(card, back = false) {
-  if (back || !card) return '/assets/cards/Blue_Back.svg';
-  return `/assets/cards/${card.rank}${card.suit}.svg`;
+  const cardName = back || !card ? 'Blue_Back' : `${card.rank}${card.suit}`;
+  return `${import.meta.env.BASE_URL}assets/cards/${cardName}.svg`;
 }
 
 function shuffle(items) {
