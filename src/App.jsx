@@ -238,6 +238,41 @@ function playerNameOrDefault(name, fallback = DEFAULT_PLAYER_NAME) {
   return trimmed || fallback;
 }
 
+function nextAvailablePlayerName(usedNames) {
+  let number = 1;
+  while (usedNames.has(`Player ${number}`)) number += 1;
+  return `Player ${number}`;
+}
+
+function distinctPlayerNames(players) {
+  const usedNames = new Set();
+  const baseCounts = new Map();
+
+  return players.map((player) => {
+    const fallbackName = player.type === 'bot' ? player.name : nextAvailablePlayerName(usedNames);
+    const originalName = playerNameOrDefault(player.name, fallbackName);
+    const defaultMatch = originalName.match(/^Player\s+\d+$/i);
+    const baseName = defaultMatch ? 'Player' : originalName;
+    let nextName;
+
+    if (defaultMatch) {
+      nextName = nextAvailablePlayerName(usedNames);
+    } else {
+      const count = (baseCounts.get(baseName) || 0) + 1;
+      baseCounts.set(baseName, count);
+      nextName = count === 1 && !usedNames.has(baseName) ? baseName : `${baseName} #${count}`;
+      while (usedNames.has(nextName)) {
+        const nextCount = (baseCounts.get(baseName) || count) + 1;
+        baseCounts.set(baseName, nextCount);
+        nextName = `${baseName} #${nextCount}`;
+      }
+    }
+
+    usedNames.add(nextName);
+    return { ...player, name: nextName };
+  });
+}
+
 function defaultPlayer(name, id = 'host', type = 'human', fallbackName = DEFAULT_PLAYER_NAME) {
   return {
     id,
@@ -299,6 +334,7 @@ function parseSharedGameId(value) {
 export default function App() {
   const [mode, setMode] = useState('computer');
   const [botCount, setBotCount] = useState(1);
+  const [onlineBotCount, setOnlineBotCount] = useState(0);
   const [roundLimit, setRoundLimit] = useState(9);
   const [scoreLimit, setScoreLimit] = useState(100);
   const [playerName, setPlayerName] = useLocalStorage({ key: 'golf-player-name', defaultValue: DEFAULT_PLAYER_NAME });
@@ -319,6 +355,8 @@ export default function App() {
   const activeVariant = GAME_VARIANTS[game?.variantKey] || selectedGame || DEFAULT_VARIANT;
   const currentPlayer = game?.players[game.turn];
   const joinedPlayers = network.connections.map((conn, index) => conn.metadata?.name || `Player ${index + 2}`);
+  const invitedBots = Array.from({ length: onlineBotCount }, (_, index) => `Computer ${index + 1}`);
+  const lobbySeatCount = joinedPlayers.length + invitedBots.length;
   const matchConfig = { roundLimit, scoreLimit };
   const localPlayerName = playerNameOrDefault(playerName);
   const isLocalPlayer = (player) => {
@@ -370,15 +408,12 @@ export default function App() {
   }, [game, localPlayerName, mode, network.role]);
 
   useEffect(() => {
+    if (mode === 'online') return;
     setGame((prev) => {
       if (!prev) return prev;
       let renamed = false;
       const players = prev.players.map((player) => {
-        const isLocal =
-          mode !== 'online'
-            ? player.type === 'human'
-            : (network.role === 'host' && player.id === 'host') || (network.role === 'guest' && player.id === network.peerId);
-        if (!isLocal || player.name === localPlayerName) return player;
+        if (player.type !== 'human' || player.name === localPlayerName) return player;
         renamed = true;
         return { ...player, name: localPlayerName };
       });
@@ -388,7 +423,8 @@ export default function App() {
 
   useEffect(() => {
     if (!selectedGame || game || invitedGameId) return;
-    setGame(dealPlayers([defaultPlayer(localPlayerName, 'host', 'human'), defaultPlayer('Computer 1', 'bot-1', 'bot')], selectedGame, matchConfig));
+    const players = distinctPlayerNames([defaultPlayer(localPlayerName, 'host', 'human'), defaultPlayer('Computer 1', 'bot-1', 'bot')]);
+    setGame(dealPlayers(players, selectedGame, matchConfig));
   }, [game, localPlayerName, invitedGameId, matchConfig, selectedGame]);
 
   useEffect(() => {
@@ -408,7 +444,8 @@ export default function App() {
     setSelectedGameKey(variantKey);
     setMode('computer');
     setSetupVisible(true);
-    setGame(dealPlayers([defaultPlayer(localPlayerName, 'host', 'human'), defaultPlayer('Computer 1', 'bot-1', 'bot')], variant, matchConfig));
+    const players = distinctPlayerNames([defaultPlayer(localPlayerName, 'host', 'human'), defaultPlayer('Computer 1', 'bot-1', 'bot')]);
+    setGame(dealPlayers(players, variant, matchConfig));
   }
 
   function startComputerGame() {
@@ -416,7 +453,7 @@ export default function App() {
     const humans = [defaultPlayer(localPlayerName, 'host', 'human')];
     const bots = Array.from({ length: botCount }, (_, index) => defaultPlayer(`Computer ${index + 1}`, `bot-${index + 1}`, 'bot'));
     setMode('computer');
-    setGame(dealPlayers([...humans, ...bots], activeVariant, matchConfig));
+    setGame(dealPlayers(distinctPlayerNames([...humans, ...bots]), activeVariant, matchConfig));
   }
 
   function startHostedRound() {
@@ -429,7 +466,9 @@ export default function App() {
     const remotePlayers = network.connections.map((conn, index) =>
       defaultPlayer(conn.metadata?.name, conn.peer, 'remote', `Player ${index + 2}`),
     );
-    setGame(dealPlayers([defaultPlayer(localPlayerName, 'host', 'human'), ...remotePlayers], activeVariant, matchConfig));
+    const botPlayers = Array.from({ length: onlineBotCount }, (_, index) => defaultPlayer(`Computer ${index + 1}`, `bot-${index + 1}`, 'bot'));
+    const players = distinctPlayerNames([defaultPlayer(localPlayerName, 'host', 'human'), ...remotePlayers, ...botPlayers]);
+    setGame(dealPlayers(players, activeVariant, matchConfig));
     setSetupVisible(false);
   }
 
@@ -439,7 +478,7 @@ export default function App() {
       else startComputerGame();
       return;
     }
-    setGame(dealPlayers(tablePlayersFromGame(game), activeVariant, matchConfig, game.match));
+    setGame(dealPlayers(distinctPlayerNames(tablePlayersFromGame(game)), activeVariant, matchConfig, game.match));
   }
 
   function hostGame() {
@@ -859,25 +898,39 @@ export default function App() {
                   </Button>
                 </Group>
                 <TextInput label="Game link or id" value={joinCode} onChange={(event) => setJoinCode(event.currentTarget.value)} />
+                {network.role === 'host' && (
+                  <NumberInput
+                    label="Computer players"
+                    min={0}
+                    max={3}
+                    value={onlineBotCount}
+                    onChange={(value) => setOnlineBotCount(value || 0)}
+                  />
+                )}
                 <Button
                   variant="default"
                   leftSection={<IconUsers size={18} />}
-                  disabled={network.role !== 'host' || !network.peerId || !network.lobbyOpen || joinedPlayers.length === 0}
+                  disabled={network.role !== 'host' || !network.peerId || !network.lobbyOpen || lobbySeatCount === 0}
                   onClick={startHostedRound}
                 >
                   Start hosted table
                 </Button>
                 {network.role === 'host' && (
                   <Paper withBorder p="sm" radius="sm">
-                    <Group justify="space-between" mb={joinedPlayers.length ? 'xs' : 0}>
+                    <Group justify="space-between" mb={lobbySeatCount ? 'xs' : 0}>
                       <Text size="sm" fw={700}>
                         Lobby
                       </Text>
-                      <Badge variant="light">{joinedPlayers.length} joined</Badge>
+                      <Badge variant="light">{lobbySeatCount} invited</Badge>
                     </Group>
-                    {joinedPlayers.length ? (
+                    {lobbySeatCount ? (
                       <Stack gap={4}>
                         {joinedPlayers.map((name, index) => (
+                          <Text key={`${name}-${index}`} size="sm" c="dimmed">
+                            {name}
+                          </Text>
+                        ))}
+                        {invitedBots.map((name, index) => (
                           <Text key={`${name}-${index}`} size="sm" c="dimmed">
                             {name}
                           </Text>
@@ -1031,9 +1084,12 @@ export default function App() {
             <Paper key={player.id} className={`playerBoard ${playerIndex === game.turn ? 'active' : ''}`} withBorder>
               <Group justify="space-between" mb="sm">
                 <div>
-                  <Title order={3}>{player.name}</Title>
+                  <Group gap="xs">
+                    <Title order={3}>{player.name}</Title>
+                    {isLocalPlayer(player) && <Badge color="yellow">Your hand</Badge>}
+                  </Group>
                   <Text size="sm" c="rgba(255,255,255,0.74)">
-                    {player.type === 'bot' ? 'Computer' : player.type === 'remote' ? 'Remote player' : 'You'}
+                    {isLocalPlayer(player) ? 'You' : player.type === 'bot' ? 'Computer' : player.type === 'remote' ? 'Remote player' : 'Opponent'}
                   </Text>
                 </div>
                 <Badge color="gray" size="lg">
