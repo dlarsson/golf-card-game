@@ -40,7 +40,7 @@ jobs:
       - name: Build
         run: |
           npm ci
-          npm run dev
+          npm run build
         
       - name: Upload generated files as artifact
         uses: actions/upload-pages-artifact@v3
