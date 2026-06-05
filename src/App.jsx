@@ -37,10 +37,12 @@ const GAME_VARIANTS = {
   four: {
     key: 'four',
     name: 'Four-card Golf',
-    subtitle: 'Fast two-by-two table. Good for learning the flow.',
+    subtitle: 'Fast two-by-two table with two cards known up front.',
     rows: 2,
     columns: 2,
-    opening: 'Each player has four cards in a 2 x 2 grid.',
+    opening: 'Each player has four face-down cards in a 2 x 2 grid and privately views two before play starts.',
+    initialKnown: 2,
+    showOwnHidden: false,
   },
   memoryFour: {
     key: 'memoryFour',
@@ -60,18 +62,22 @@ const GAME_VARIANTS = {
   six: {
     key: 'six',
     name: 'Six-card Golf',
-    subtitle: 'Classic two-by-three table with column cancellation.',
+    subtitle: 'Classic two-by-three table with two cards known up front.',
     rows: 2,
     columns: 3,
-    opening: 'Each player has six cards in a 2 x 3 grid.',
+    opening: 'Each player has six face-down cards in a 2 x 3 grid and privately views two before play starts.',
+    initialKnown: 2,
+    showOwnHidden: false,
   },
   nine: {
     key: 'nine',
     name: 'Nine-card Golf',
-    subtitle: 'Larger three-by-three table with more memory pressure.',
+    subtitle: 'Larger three-by-three table with two cards known up front.',
     rows: 3,
     columns: 3,
-    opening: 'Each player has nine cards in a 3 x 3 grid.',
+    opening: 'Each player has nine face-down cards in a 3 x 3 grid and privately views two before play starts.',
+    initialKnown: 2,
+    showOwnHidden: false,
   },
 };
 const DEFAULT_VARIANT = GAME_VARIANTS.six;
@@ -253,6 +259,33 @@ function resolveRoundScores(players, variant = DEFAULT_VARIANT) {
   return Object.fromEntries(players.map((player) => [player.id, scoreCards(player.cards, variant)]));
 }
 
+function hiddenCard(playerId, index) {
+  return { id: `hidden-${playerId}-${index}`, hidden: true };
+}
+
+function canViewerSeeCard(game, player, index, viewerId, variant = DEFAULT_VARIANT) {
+  return (
+    player.revealed[index] ||
+    game.status === 'complete' ||
+    (player.id === viewerId && game.status === 'preview' && !player.ready && player.known?.[index]) ||
+    (player.id === viewerId && variant.showOwnHidden !== false)
+  );
+}
+
+function gameForPlayer(game, viewerId, variant = DEFAULT_VARIANT) {
+  if (!game) return game;
+  const currentPlayer = game.players[game.turn];
+  return {
+    ...game,
+    deck: Array.from({ length: game.deck.length }, (_, index) => hiddenCard('deck', index)),
+    drawn: currentPlayer?.id === viewerId || game.status === 'complete' ? game.drawn : null,
+    players: game.players.map((player) => ({
+      ...player,
+      cards: player.cards.map((card, index) => (canViewerSeeCard(game, player, index, viewerId, variant) ? card : hiddenCard(player.id, index))),
+    })),
+  };
+}
+
 function parseSharedGameId(value) {
   if (!value) return '';
   try {
@@ -273,16 +306,19 @@ export default function App() {
   const [selectedGameKey, setSelectedGameKey] = useState('');
   const selectedGame = GAME_VARIANTS[selectedGameKey] || null;
   const [game, setGame] = useState(null);
-  const [network, setNetwork] = useState({ role: 'offline', peerId: '', connections: [], status: 'No online table yet.' });
+  const [network, setNetwork] = useState({ role: 'offline', peerId: '', connections: [], status: 'No online table yet.', lobbyOpen: false });
   const [joinCode, setJoinCode] = useState('');
   const [invitedGameId, setInvitedGameId] = useState('');
   const [setupVisible, setSetupVisible] = useState(true);
   const peerRef = useRef(null);
   const connectionsRef = useRef([]);
   const autoJoinRef = useRef(false);
+  const gameRef = useRef(null);
+  const lobbyOpenRef = useRef(false);
 
   const activeVariant = GAME_VARIANTS[game?.variantKey] || selectedGame || DEFAULT_VARIANT;
   const currentPlayer = game?.players[game.turn];
+  const joinedPlayers = network.connections.map((conn, index) => conn.metadata?.name || `Player ${index + 2}`);
   const matchConfig = { roundLimit, scoreLimit };
   const localPlayerName = playerNameOrDefault(playerName);
   const isLocalPlayer = (player) => {
@@ -293,6 +329,7 @@ export default function App() {
     return false;
   };
   const localCanAct = game?.status === 'playing' && isLocalPlayer(currentPlayer);
+  const visibleDrawn = game?.drawn && (isLocalPlayer(currentPlayer) || game.status === 'complete');
   const gameLink =
     network.role === 'host' && network.peerId
       ? `${window.location.origin}${window.location.pathname}?game=${network.peerId}&variant=${activeVariant.key}`
@@ -324,8 +361,12 @@ export default function App() {
   }, [mode, invitedGameId, network.role]);
 
   useEffect(() => {
+    gameRef.current = game;
+  }, [game]);
+
+  useEffect(() => {
     if (mode !== 'online' || network.role !== 'host' || !game) return;
-    broadcast({ type: 'state', game, hostName: localPlayerName });
+    broadcastState(game);
   }, [game, localPlayerName, mode, network.role]);
 
   useEffect(() => {
@@ -383,6 +424,8 @@ export default function App() {
       appendLog('Host an online game before starting the table.');
       return;
     }
+    lobbyOpenRef.current = false;
+    setNetwork((prev) => ({ ...prev, lobbyOpen: false, status: 'Table started. New players cannot join.' }));
     const remotePlayers = network.connections.map((conn, index) =>
       defaultPlayer(conn.metadata?.name, conn.peer, 'remote', `Player ${index + 2}`),
     );
@@ -403,22 +446,34 @@ export default function App() {
     closeNetwork();
     const peer = new Peer();
     peerRef.current = peer;
-    setNetwork({ role: 'host', peerId: '', connections: [], status: 'Opening host table...' });
+    lobbyOpenRef.current = true;
+    setNetwork({ role: 'host', peerId: '', connections: [], status: 'Opening host table...', lobbyOpen: true });
     peer.on('open', (id) => setNetwork((prev) => ({ ...prev, peerId: id, status: 'Host table is open. Share the game link.' })));
     peer.on('connection', (conn) => {
       conn.on('open', () => {
+        if (!lobbyOpenRef.current) {
+          conn.send({ type: 'rejected', reason: 'This table has already started.' });
+          conn.close();
+          setNetwork((prev) => ({ ...prev, status: 'A player tried to join after the table started.' }));
+          return;
+        }
         connectionsRef.current = [...connectionsRef.current, conn];
         setNetwork((prev) => ({
           ...prev,
           connections: [...connectionsRef.current],
-          status: `${connectionsRef.current.length} player connection${connectionsRef.current.length === 1 ? '' : 's'} ready.`,
+          status: `${connectionsRef.current.length} player${connectionsRef.current.length === 1 ? '' : 's'} in the lobby.`,
         }));
-        conn.send({ type: 'state', game, hostName: localPlayerName });
       });
       conn.on('data', (message) => handleRemoteMessage(conn, message));
       conn.on('close', () => {
         connectionsRef.current = connectionsRef.current.filter((item) => item.peer !== conn.peer);
-        setNetwork((prev) => ({ ...prev, connections: connectionsRef.current, status: 'A player disconnected.' }));
+        setNetwork((prev) => ({
+          ...prev,
+          connections: connectionsRef.current,
+          status: prev.lobbyOpen
+            ? `${connectionsRef.current.length} player${connectionsRef.current.length === 1 ? '' : 's'} in the lobby.`
+            : 'A player disconnected.',
+        }));
       });
     });
     peer.on('error', (error) => setNetwork((prev) => ({ ...prev, status: error.message })));
@@ -430,7 +485,8 @@ export default function App() {
     closeNetwork();
     const peer = new Peer();
     peerRef.current = peer;
-    setNetwork({ role: 'guest', peerId: '', connections: [], status: 'Connecting to host...' });
+    lobbyOpenRef.current = false;
+    setNetwork({ role: 'guest', peerId: '', connections: [], status: 'Connecting to host...', lobbyOpen: false });
     peer.on('open', (id) => {
       const conn = peer.connect(remoteId, { metadata: { name: localPlayerName } });
       connectionsRef.current = [conn];
@@ -441,6 +497,12 @@ export default function App() {
         conn.send({ type: 'hello', name: localPlayerName });
       });
       conn.on('data', (message) => {
+        if (message.type === 'rejected') {
+          setNetwork((prev) => ({ ...prev, status: message.reason || 'This table is no longer accepting players.' }));
+          setSetupVisible(true);
+          conn.close();
+          return;
+        }
         if (message.type === 'state') {
           setGame(message.game);
           setSetupVisible(false);
@@ -455,21 +517,30 @@ export default function App() {
     connectionsRef.current = [];
     peerRef.current?.destroy();
     peerRef.current = null;
-    setNetwork({ role: 'offline', peerId: '', connections: [], status: 'No online table yet.' });
-  }
-
-  function broadcast(message) {
-    connectionsRef.current.forEach((conn) => {
-      if (conn.open) conn.send(message);
-    });
+    lobbyOpenRef.current = false;
+    setNetwork({ role: 'offline', peerId: '', connections: [], status: 'No online table yet.', lobbyOpen: false });
   }
 
   function handleRemoteMessage(conn, message) {
     if (message.type === 'hello') {
       conn.metadata = { ...(conn.metadata || {}), name: message.name };
-      setNetwork((prev) => ({ ...prev, connections: [...connectionsRef.current] }));
+      setNetwork((prev) => ({
+        ...prev,
+        connections: [...connectionsRef.current],
+        status: `${connectionsRef.current.length} player${connectionsRef.current.length === 1 ? '' : 's'} in the lobby.`,
+      }));
     }
     if (message.type === 'action') applyAction(message.action, conn.peer);
+  }
+
+  function sendState(conn, fullGame) {
+    if (!conn.open || !fullGame) return;
+    const variant = GAME_VARIANTS[fullGame.variantKey] || DEFAULT_VARIANT;
+    conn.send({ type: 'state', game: gameForPlayer(fullGame, conn.peer, variant), hostName: localPlayerName });
+  }
+
+  function broadcastState(fullGame) {
+    connectionsRef.current.forEach((conn) => sendState(conn, fullGame));
   }
 
   function applyAction(action, actorId = 'host') {
@@ -497,7 +568,7 @@ export default function App() {
     }
 
     const active = prev.players[prev.turn];
-    if (!active || (active.type === 'remote' && active.id !== actorId)) return prev;
+    if (!active || active.id !== actorId) return prev;
     const next = structuredClone(prev);
     const player = next.players[next.turn];
     const logName = player.name;
@@ -590,13 +661,13 @@ export default function App() {
     if (!player || player.type !== 'bot') return;
     if (game.pendingReveal === game.turn) {
       const reveal = chooseBotReveal(player, activeVariant);
-      if (reveal) applyAction({ type: 'reveal', index: reveal.index });
+      if (reveal) applyAction({ type: 'reveal', index: reveal.index }, player.id);
       return;
     }
 
     if (game.drawn) {
       const target = findBotReplacement(player, game.drawn, activeVariant);
-      applyAction(target && target.improvement > 0.25 ? { type: 'replace', index: target.index } : { type: 'discardDrawn' });
+      applyAction(target && target.improvement > 0.25 ? { type: 'replace', index: target.index } : { type: 'discardDrawn' }, player.id);
       return;
     }
 
@@ -604,7 +675,7 @@ export default function App() {
     const discardTarget = topDiscard ? findBotReplacement(player, topDiscard, activeVariant) : null;
     const shouldTakeDiscard =
       discardTarget && discardTarget.improvement > 0.75 && !createsUnpairedThirdKnownRank(player, topDiscard, discardTarget.index);
-    applyAction({ type: shouldTakeDiscard ? 'drawDiscard' : 'drawDeck' });
+    applyAction({ type: shouldTakeDiscard ? 'drawDiscard' : 'drawDeck' }, player.id);
   }
 
   const standings = useMemo(
@@ -791,11 +862,34 @@ export default function App() {
                 <Button
                   variant="default"
                   leftSection={<IconUsers size={18} />}
-                  disabled={network.role !== 'host' || !network.peerId}
+                  disabled={network.role !== 'host' || !network.peerId || !network.lobbyOpen || joinedPlayers.length === 0}
                   onClick={startHostedRound}
                 >
                   Start hosted table
                 </Button>
+                {network.role === 'host' && (
+                  <Paper withBorder p="sm" radius="sm">
+                    <Group justify="space-between" mb={joinedPlayers.length ? 'xs' : 0}>
+                      <Text size="sm" fw={700}>
+                        Lobby
+                      </Text>
+                      <Badge variant="light">{joinedPlayers.length} joined</Badge>
+                    </Group>
+                    {joinedPlayers.length ? (
+                      <Stack gap={4}>
+                        {joinedPlayers.map((name, index) => (
+                          <Text key={`${name}-${index}`} size="sm" c="dimmed">
+                            {name}
+                          </Text>
+                        ))}
+                      </Stack>
+                    ) : (
+                      <Text size="sm" c="dimmed">
+                        Waiting for players to join.
+                      </Text>
+                    )}
+                  </Paper>
+                )}
                 {gameLink && (
                   <Paper withBorder p="sm" radius="sm">
                     <Text size="sm" fw={700}>
@@ -915,8 +1009,8 @@ export default function App() {
           <div className="drawnSlot">
             <Text className="eyebrow">In hand</Text>
             <button
-              className={`cardButton ${game?.drawn ? '' : 'placeholder'}`}
-              style={{ backgroundImage: game?.drawn ? `url(${cardImage(game.drawn)})` : undefined }}
+              className={`cardButton ${visibleDrawn ? '' : 'placeholder'}`}
+              style={{ backgroundImage: visibleDrawn ? `url(${cardImage(game.drawn)})` : undefined }}
               aria-label="Drawn card"
               disabled
             />
