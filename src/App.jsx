@@ -354,7 +354,8 @@ export default function App() {
 
   const activeVariant = GAME_VARIANTS[game?.variantKey] || selectedGame || DEFAULT_VARIANT;
   const currentPlayer = game?.players[game.turn];
-  const joinedPlayers = network.connections.map((conn, index) => conn.metadata?.name || `Player ${index + 2}`);
+  const activeLobbyConnections = network.connections.filter((conn) => conn.open !== false);
+  const joinedPlayers = activeLobbyConnections.map((conn, index) => conn.metadata?.name || `Player ${index + 2}`);
   const invitedBots = Array.from({ length: onlineBotCount }, (_, index) => `Computer ${index + 1}`);
   const lobbySeatCount = joinedPlayers.length + invitedBots.length;
   const matchConfig = { roundLimit, scoreLimit };
@@ -463,7 +464,8 @@ export default function App() {
     }
     lobbyOpenRef.current = false;
     setNetwork((prev) => ({ ...prev, lobbyOpen: false, status: 'Table started. New players cannot join.' }));
-    const remotePlayers = network.connections.map((conn, index) =>
+    const activeConnections = connectionsRef.current.filter((conn) => conn.open !== false);
+    const remotePlayers = activeConnections.map((conn, index) =>
       defaultPlayer(conn.metadata?.name, conn.peer, 'remote', `Player ${index + 2}`),
     );
     const botPlayers = Array.from({ length: onlineBotCount }, (_, index) => defaultPlayer(`Computer ${index + 1}`, `bot-${index + 1}`, 'bot'));
