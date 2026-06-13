@@ -82,6 +82,7 @@ const GAME_VARIANTS = {
 };
 const DEFAULT_VARIANT = GAME_VARIANTS.six;
 const DEFAULT_PLAYER_NAME = 'Player 1';
+const APP_COMMIT = __APP_COMMIT__;
 
 function cardId(rank, suit) {
   return `${rank}${suit}`;
@@ -772,17 +773,20 @@ export default function App() {
     return (
       <main className="tableShell chooserShell">
         <section className="gameChooser">
-          <Group justify="space-between" align="start">
-            <div>
-              <Text className="eyebrow">Choose a game</Text>
-              <Title order={1}>Golf Cards</Title>
-              <Text c="rgba(255,255,255,0.78)" mt="xs">
-                Pick a table layout, then play against computers or host an online table.
-              </Text>
-            </div>
-            <Button variant="default" leftSection={<IconQuestionMark size={18} />} onClick={rulesModal.open}>
-              Rules
-            </Button>
+            <Group justify="space-between" align="start">
+              <div>
+                <Text className="eyebrow">Choose a game</Text>
+                <Title order={1}>Golf Cards</Title>
+                <Text c="rgba(255,255,255,0.78)" mt="xs">
+                  Pick a table layout, then play against computers or host an online table.
+                </Text>
+                <Text size="xs" c="rgba(255,255,255,0.58)" mt={4}>
+                  Version {APP_COMMIT}
+                </Text>
+              </div>
+              <Button variant="default" leftSection={<IconQuestionMark size={18} />} onClick={rulesModal.open}>
+                Rules
+              </Button>
           </Group>
           <div className="choiceGrid">
             {Object.values(GAME_VARIANTS).map((variant) => (
@@ -968,6 +972,9 @@ export default function App() {
               </Stack>
             )}
           </Card>
+          <Text size="xs" c="dimmed">
+            Version {APP_COMMIT}
+          </Text>
         </Stack>
       </AppShell.Navbar>
 
@@ -985,6 +992,9 @@ export default function App() {
             <Text c="rgba(255,255,255,0.74)" size="sm">
               {activeVariant.name}
               {game?.match ? ` · Round ${game.match.roundNumber} of ${game.match.roundLimit} · Score limit ${game.match.scoreLimit}` : ''}
+            </Text>
+            <Text c="rgba(255,255,255,0.58)" size="xs">
+              Version {APP_COMMIT}
             </Text>
           </div>
           <Group>
