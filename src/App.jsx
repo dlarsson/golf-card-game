@@ -666,7 +666,7 @@ export default function App() {
               Version {APP_COMMIT}
             </Text>
           </div>
-          <Group>
+          <Group className="tableActions">
             {!setupVisible && (
               <Button variant="default" onClick={() => setSetupVisible(true)}>
                 Setup
@@ -698,9 +698,9 @@ export default function App() {
                 Lowest score wins
               </Text>
             </Group>
-            <Group gap="sm">
+            <Group className="scoreBadges" gap="sm">
               {standings.map((player, index) => (
-                <Badge key={player.id} size="lg" color={index === 0 ? 'yellow' : 'gray'} variant={index === 0 ? 'filled' : 'light'}>
+                <Badge key={player.id} className="scoreBadge" size="lg" color={index === 0 ? 'yellow' : 'gray'} variant={index === 0 ? 'filled' : 'light'}>
                   {player.name}: {player.totalScore}
                   {game.status === 'complete' ? ` (+${player.roundScore})` : ''}
                 </Badge>
@@ -761,7 +761,7 @@ export default function App() {
         <section className="players">
           {game?.players.map((player, playerIndex) => (
             <Paper key={player.id} className={`playerBoard ${playerIndex === game.turn ? 'active' : ''}`} withBorder>
-              <Group justify="space-between" mb="sm">
+              <Group className="playerHeader" justify="space-between" mb="sm">
                 <div>
                   <Group gap="xs">
                     <Title order={3}>{player.name}</Title>
@@ -771,7 +771,7 @@ export default function App() {
                     {isLocalPlayer(player) ? 'You' : player.type === 'bot' ? 'Computer' : player.type === 'remote' ? 'Remote player' : 'Opponent'}
                   </Text>
                 </div>
-                <Badge color="gray" size="lg">
+                <Badge className="playerSummary" color="gray" size="lg">
                   {ACTIVE_GAME.getPlayerSummary(player, game, activeVariant)}
                 </Badge>
               </Group>

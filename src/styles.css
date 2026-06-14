@@ -10,6 +10,13 @@
   box-sizing: border-box;
 }
 
+html,
+body,
+#root {
+  min-width: 0;
+  overflow-x: hidden;
+}
+
 body {
   margin: 0;
   color: var(--ink);
@@ -47,6 +54,8 @@ button {
 .tableShell {
   display: flex;
   flex-direction: column;
+  width: 100%;
+  min-width: 0;
   min-height: 100vh;
   gap: 18px;
   padding: 24px;
@@ -91,6 +100,11 @@ button {
   color: #fff;
 }
 
+.tableActions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 .eyebrow {
   margin: 0 0 4px;
   color: rgba(255, 255, 255, 0.74);
@@ -102,6 +116,23 @@ button {
 
 .standings {
   background: rgba(255, 255, 255, 0.92);
+}
+
+.scoreBadges,
+.playerHeader {
+  min-width: 0;
+}
+
+.scoreBadge,
+.playerSummary {
+  max-width: 100%;
+}
+
+.scoreBadge .mantine-Badge-label,
+.playerSummary .mantine-Badge-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .drawArea {
@@ -214,22 +245,132 @@ button {
 
 @media (max-width: 48em) {
   .mantine-AppShell-navbar.sidebar {
-    position: static;
+    position: fixed;
+    inset: 0;
     width: 100%;
-    height: auto;
+    height: 100dvh;
+    max-width: none;
     transform: none;
+    z-index: 40;
   }
 
   .mantine-AppShell-main {
     padding-inline-start: 0;
+    width: 100%;
+    min-width: 0;
   }
 
   .sidebar {
     padding: 16px;
   }
 
+  .sidebar h1 {
+    font-size: 2.2rem;
+  }
+
   .tableShell {
-    padding: 16px;
+    min-height: 100dvh;
+    gap: 12px;
+    padding: 12px;
+  }
+
+  .tableHeader {
+    gap: 10px;
+  }
+
+  .tableHeader h2 {
+    font-size: 1.35rem;
+    line-height: 1.12;
+  }
+
+  .tableActions {
+    width: 100%;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .tableActions .mantine-Button-root {
+    width: 100%;
+    min-width: 0;
+    padding-inline: 8px;
+  }
+
+  .standings {
+    padding: 10px !important;
+  }
+
+  .scoreBadges {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  .scoreBadge {
+    width: 100%;
+  }
+
+  .drawArea {
+    justify-content: stretch;
+    gap: 8px;
+  }
+
+  .pile,
+  .cardButton {
+    border-radius: 6px;
+  }
+
+  .deckPile::after,
+  .discardPile::after {
+    bottom: -20px;
+    left: 4px;
+    font-size: 0.7rem;
+  }
+
+  .players {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .playerBoard {
+    padding: 10px;
+  }
+
+  .playerBoard.active {
+    outline-width: 2px;
+  }
+
+  .playerHeader {
+    gap: 8px;
+    align-items: flex-start;
+  }
+
+  .playerHeader > * {
+    min-width: 0;
+  }
+
+  .playerHeader h3 {
+    font-size: 1rem;
+    line-height: 1.15;
+  }
+
+  .playerSummary {
+    max-width: 46%;
+  }
+
+  .cardGrid {
+    width: 100%;
+    max-width: none;
+    grid-template-columns: repeat(var(--grid-columns, 3), minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  .logPanel {
+    min-height: 0;
+  }
+
+  .logPanel .mantine-ScrollArea-root {
+    height: 96px !important;
   }
 }
 
@@ -243,7 +384,41 @@ button {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
+  .drawnSlot {
+    gap: 5px;
+  }
+
+  .drawnSlot .mantine-Button-root {
+    padding-inline: 8px;
+  }
+
   .choiceGrid {
     grid-template-columns: 1fr;
+  }
+
+  .gameChoice {
+    min-height: 128px;
+    padding: 14px;
+  }
+
+  .tableActions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .tableActions .mantine-Button-root:last-child {
+    grid-column: 1 / -1;
+  }
+
+  .scoreBadges {
+    grid-template-columns: 1fr;
+  }
+
+  .playerSummary {
+    max-width: 100%;
+  }
+
+  .cardButton.selectable,
+  .cardButton.selected {
+    outline-width: 2px;
   }
 }
