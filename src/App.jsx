@@ -30,210 +30,13 @@ import {
   IconUsers,
 } from '@tabler/icons-react';
 import { Peer } from 'peerjs';
+import { defaultGame } from './games';
 
-const SUITS = ['C', 'D', 'H', 'S'];
-const RANKS = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
-const GAME_VARIANTS = {
-  four: {
-    key: 'four',
-    name: 'Four-card Golf',
-    subtitle: 'Fast two-by-two table with two cards known up front.',
-    rows: 2,
-    columns: 2,
-    opening: 'Each player has four face-down cards in a 2 x 2 grid and privately views two before play starts.',
-    initialKnown: 2,
-    showOwnHidden: false,
-  },
-  memoryFour: {
-    key: 'memoryFour',
-    name: 'Four-card Memory Golf',
-    subtitle: 'Two cards known up front, locked face-up replacements, Jack scores 0.',
-    rows: 2,
-    columns: 2,
-    opening: 'Each player has four face-down cards; two are privately shown to their owner before play starts.',
-    initialKnown: 2,
-    showOwnHidden: false,
-    lockRevealedCards: true,
-    discardRequiresReveal: true,
-    pairCancellation: true,
-    jackZero: true,
-    kingZero: false,
-  },
-  six: {
-    key: 'six',
-    name: 'Six-card Golf',
-    subtitle: 'Classic two-by-three table with two cards known up front.',
-    rows: 2,
-    columns: 3,
-    opening: 'Each player has six face-down cards in a 2 x 3 grid and privately views two before play starts.',
-    initialKnown: 2,
-    showOwnHidden: false,
-  },
-  nine: {
-    key: 'nine',
-    name: 'Nine-card Golf',
-    subtitle: 'Larger three-by-three table with two cards known up front.',
-    rows: 3,
-    columns: 3,
-    opening: 'Each player has nine face-down cards in a 3 x 3 grid and privately views two before play starts.',
-    initialKnown: 2,
-    showOwnHidden: false,
-  },
-};
-const DEFAULT_VARIANT = GAME_VARIANTS.six;
+const ACTIVE_GAME = defaultGame;
+const GAME_VARIANTS = ACTIVE_GAME.variants;
+const DEFAULT_VARIANT = ACTIVE_GAME.defaultVariant;
 const DEFAULT_PLAYER_NAME = 'Player 1';
 const APP_COMMIT = __APP_COMMIT__;
-
-function cardId(rank, suit) {
-  return `${rank}${suit}`;
-}
-
-function cardImage(card, back = false) {
-  const cardName = back || !card ? 'Blue_Back' : `${card.rank}${card.suit}`;
-  return `${import.meta.env.BASE_URL}assets/cards/${cardName}.svg`;
-}
-
-function shuffle(items) {
-  const copy = [...items];
-  for (let i = copy.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [copy[i], copy[j]] = [copy[j], copy[i]];
-  }
-  return copy;
-}
-
-function createDeck() {
-  return shuffle(SUITS.flatMap((suit) => RANKS.map((rank) => ({ id: cardId(rank, suit), rank, suit }))));
-}
-
-function cardValue(card, variant = DEFAULT_VARIANT) {
-  if (!card) return 0;
-  if (card.rank === 'J' && variant.jackZero) return 0;
-  if (card.rank === 'K' && variant.kingZero !== false) return 0;
-  if (card.rank === 'A') return 1;
-  if (['J', 'Q', 'K'].includes(card.rank)) return 10;
-  const numericValue = Number(card.rank);
-  return Number.isFinite(numericValue) ? numericValue : 0;
-}
-
-function scoreCards(cards, variant = DEFAULT_VARIANT) {
-  const safeCards = Array.isArray(cards) ? cards.filter(Boolean) : [];
-  if (variant.pairCancellation) {
-    const cardsByRank = safeCards.reduce(
-      (groups, card) => ({
-        ...groups,
-        [card.rank]: [...(groups[card.rank] || []), card],
-      }),
-      {},
-    );
-    return Object.values(cardsByRank).reduce((total, rankCards) => {
-      const unpairedCount = rankCards.length % 2;
-      return total + unpairedCount * cardValue(rankCards[0], variant);
-    }, 0);
-  }
-
-  return Array.from({ length: variant.columns }).reduce((total, _, column) => {
-    const columnCards = Array.from({ length: variant.rows }, (__, row) => cards?.[row * variant.columns + column]).filter(Boolean);
-    const cancels = columnCards.length > 1 && columnCards.every((card) => card.rank === columnCards[0].rank);
-    return cancels ? total : total + columnCards.reduce((columnTotal, card) => columnTotal + cardValue(card, variant), 0);
-  }, 0);
-}
-
-function visibleScore(player, variant = DEFAULT_VARIANT, revealAll = false) {
-  if (!player?.cards) return 0;
-  const cards = revealAll ? player.cards : player.cards.map((card, index) => (player.revealed[index] ? card : null));
-  return scoreCards(cards, variant);
-}
-
-function averageCardValue(variant = DEFAULT_VARIANT) {
-  const total = RANKS.reduce((sum, rank) => sum + cardValue({ rank }, variant), 0);
-  return total / RANKS.length;
-}
-
-function botKnowsCard(player, index) {
-  return Boolean(player?.revealed?.[index] || player?.known?.[index]);
-}
-
-function botVisibleCards(player) {
-  return player.cards.map((card, index) => (botKnowsCard(player, index) ? card : null));
-}
-
-function estimatedBotScore(player, variant = DEFAULT_VARIANT) {
-  const hiddenUnknownCount = player.cards.filter((_, index) => !botKnowsCard(player, index)).length;
-  return scoreCards(botVisibleCards(player), variant) + hiddenUnknownCount * averageCardValue(variant);
-}
-
-function findBotReplacement(player, drawnCard, variant = DEFAULT_VARIANT) {
-  const beforeScore = estimatedBotScore(player, variant);
-  const candidates = player.cards
-    .map((card, index) => ({ card, index, known: botKnowsCard(player, index), revealed: player.revealed[index] }))
-    .filter((item) => !variant.lockRevealedCards || !item.revealed)
-    .map((item) => {
-      const nextCards = botVisibleCards(player);
-      nextCards[item.index] = drawnCard;
-      const remainingUnknownCount = player.cards.filter((_, index) => index !== item.index && !botKnowsCard(player, index)).length;
-      const afterScore = scoreCards(nextCards, variant) + remainingUnknownCount * averageCardValue(variant);
-      return {
-        index: item.index,
-        improvement: beforeScore - afterScore,
-        known: item.known,
-        oldValue: item.known ? cardValue(item.card, variant) : averageCardValue(variant),
-      };
-    })
-    .sort((a, b) => b.improvement - a.improvement || b.oldValue - a.oldValue);
-
-  return candidates[0] || null;
-}
-
-function createsUnpairedThirdKnownRank(player, drawnCard, targetIndex) {
-  if (!drawnCard) return false;
-  const matchingKnownCards = player.cards.filter((card, index) => index !== targetIndex && botKnowsCard(player, index) && card.rank === drawnCard.rank);
-  return matchingKnownCards.length % 2 === 0 && matchingKnownCards.length >= 2;
-}
-
-function chooseBotReveal(player, variant = DEFAULT_VARIANT) {
-  return player.cards
-    .map((card, index) => ({ index, known: botKnowsCard(player, index), value: cardValue(card, variant), revealed: player.revealed[index] }))
-    .filter((item) => !item.revealed)
-    .sort((a, b) => Number(b.known) - Number(a.known) || a.value - b.value)[0];
-}
-
-function dealPlayers(players, variant = DEFAULT_VARIANT, matchConfig = {}, previousMatch = null) {
-  const deck = createDeck();
-  const cardCount = variant.rows * variant.columns;
-  const startingTurn = previousMatch ? previousMatch.roundNumber % players.length : 0;
-  const nextPlayers = players.map((player) => ({
-    ...player,
-    cards: Array.from({ length: cardCount }, () => deck.pop()),
-    revealed: Array.from({ length: cardCount }, () => false),
-    known: Array.from({ length: cardCount }, (_, index) => index < (variant.initialKnown || 0)),
-    ready: player.type === 'bot' || !variant.initialKnown,
-    knocked: false,
-  }));
-  const preview = variant.initialKnown > 0;
-  const discard = [deck.pop()];
-  return {
-    players: nextPlayers,
-    deck,
-    discard,
-    drawn: null,
-    turn: startingTurn,
-    status: preview ? 'preview' : 'playing',
-    log: preview ? ['Review your two known cards, then hide them to start.'] : [`${nextPlayers[startingTurn].name} starts the round.`],
-    round: crypto.randomUUID(),
-    variantKey: variant.key,
-    match: {
-      roundNumber: (previousMatch?.roundNumber || 0) + 1,
-      roundLimit: matchConfig.roundLimit || previousMatch?.roundLimit || 9,
-      scoreLimit: matchConfig.scoreLimit || previousMatch?.scoreLimit || 100,
-      totalScores:
-        previousMatch?.totalScores ||
-        Object.fromEntries(nextPlayers.map((player) => [player.id, 0])),
-      roundScores: {},
-      complete: false,
-    },
-  };
-}
 
 function playerNameOrDefault(name, fallback = DEFAULT_PLAYER_NAME) {
   const trimmed = typeof name === 'string' ? name.trim() : '';
@@ -290,37 +93,6 @@ function defaultPlayer(name, id = 'host', type = 'human', fallbackName = DEFAULT
 
 function tablePlayersFromGame(game) {
   return game.players.map((player) => defaultPlayer(player.name, player.id, player.type));
-}
-
-function resolveRoundScores(players, variant = DEFAULT_VARIANT) {
-  return Object.fromEntries(players.map((player) => [player.id, scoreCards(player.cards, variant)]));
-}
-
-function hiddenCard(playerId, index) {
-  return { id: `hidden-${playerId}-${index}`, hidden: true };
-}
-
-function canViewerSeeCard(game, player, index, viewerId, variant = DEFAULT_VARIANT) {
-  return (
-    player.revealed[index] ||
-    game.status === 'complete' ||
-    (player.id === viewerId && game.status === 'preview' && !player.ready && player.known?.[index]) ||
-    (player.id === viewerId && variant.showOwnHidden !== false)
-  );
-}
-
-function gameForPlayer(game, viewerId, variant = DEFAULT_VARIANT) {
-  if (!game) return game;
-  const currentPlayer = game.players[game.turn];
-  return {
-    ...game,
-    deck: Array.from({ length: game.deck.length }, (_, index) => hiddenCard('deck', index)),
-    drawn: currentPlayer?.id === viewerId || game.status === 'complete' ? game.drawn : null,
-    players: game.players.map((player) => ({
-      ...player,
-      cards: player.cards.map((card, index) => (canViewerSeeCard(game, player, index, viewerId, variant) ? card : hiddenCard(player.id, index))),
-    })),
-  };
 }
 
 function parseSharedGameId(value) {
@@ -427,7 +199,7 @@ export default function App() {
   useEffect(() => {
     if (!selectedGame || game || invitedGameId) return;
     const players = distinctPlayerNames([defaultPlayer(localPlayerName, 'host', 'human'), defaultPlayer('Computer 1', 'bot-1', 'bot')]);
-    setGame(dealPlayers(players, selectedGame, matchConfig));
+    setGame(ACTIVE_GAME.dealPlayers(players, selectedGame, matchConfig));
   }, [game, localPlayerName, invitedGameId, matchConfig, selectedGame]);
 
   useEffect(() => {
@@ -448,7 +220,7 @@ export default function App() {
     setMode('computer');
     setSetupVisible(true);
     const players = distinctPlayerNames([defaultPlayer(localPlayerName, 'host', 'human'), defaultPlayer('Computer 1', 'bot-1', 'bot')]);
-    setGame(dealPlayers(players, variant, matchConfig));
+    setGame(ACTIVE_GAME.dealPlayers(players, variant, matchConfig));
   }
 
   function startComputerGame() {
@@ -456,7 +228,7 @@ export default function App() {
     const humans = [defaultPlayer(localPlayerName, 'host', 'human')];
     const bots = Array.from({ length: botCount }, (_, index) => defaultPlayer(`Computer ${index + 1}`, `bot-${index + 1}`, 'bot'));
     setMode('computer');
-    setGame(dealPlayers(distinctPlayerNames([...humans, ...bots]), activeVariant, matchConfig));
+    setGame(ACTIVE_GAME.dealPlayers(distinctPlayerNames([...humans, ...bots]), activeVariant, matchConfig));
   }
 
   function startHostedRound() {
@@ -472,7 +244,7 @@ export default function App() {
     );
     const botPlayers = Array.from({ length: onlineBotCount }, (_, index) => defaultPlayer(`Computer ${index + 1}`, `bot-${index + 1}`, 'bot'));
     const players = distinctPlayerNames([defaultPlayer(localPlayerName, 'host', 'human'), ...remotePlayers, ...botPlayers]);
-    setGame(dealPlayers(players, activeVariant, matchConfig));
+    setGame(ACTIVE_GAME.dealPlayers(players, activeVariant, matchConfig));
     setSetupVisible(false);
   }
 
@@ -482,7 +254,7 @@ export default function App() {
       else startComputerGame();
       return;
     }
-    setGame(dealPlayers(distinctPlayerNames(tablePlayersFromGame(game)), activeVariant, matchConfig, game.match));
+    setGame(ACTIVE_GAME.dealPlayers(distinctPlayerNames(tablePlayersFromGame(game)), activeVariant, matchConfig, game.match));
   }
 
   function hostGame() {
@@ -578,8 +350,7 @@ export default function App() {
 
   function sendState(conn, fullGame) {
     if (!conn.open || !fullGame) return;
-    const variant = GAME_VARIANTS[fullGame.variantKey] || DEFAULT_VARIANT;
-    conn.send({ type: 'state', game: gameForPlayer(fullGame, conn.peer, variant), hostName: localPlayerName });
+    conn.send({ type: 'state', game: ACTIVE_GAME.gameForPlayer(fullGame, conn.peer), hostName: localPlayerName });
   }
 
   function broadcastState(fullGame) {
@@ -591,134 +362,13 @@ export default function App() {
       connectionsRef.current[0]?.send({ type: 'action', action });
       return;
     }
-    setGame((prev) => reduceGame(prev, action, actorId));
-  }
-
-  function reduceGame(prev, action, actorId) {
-    if (!prev) return prev;
-    const variant = GAME_VARIANTS[prev.variantKey] || DEFAULT_VARIANT;
-    if (action.type === 'ready') {
-      const next = structuredClone(prev);
-      const readyPlayer = next.players.find((player) => player.id === actorId);
-      if (!readyPlayer || readyPlayer.ready) return prev;
-      readyPlayer.ready = true;
-      const allReady = next.players.every((player) => player.ready);
-      next.status = allReady ? 'playing' : 'preview';
-      next.log = allReady
-        ? [`${next.players[next.turn].name}'s turn.`, `${readyPlayer.name} is ready.`, ...next.log]
-        : [`${readyPlayer.name} is ready.`, ...next.log];
-      return next;
-    }
-
-    const active = prev.players[prev.turn];
-    if (!active || active.id !== actorId) return prev;
-    const next = structuredClone(prev);
-    const player = next.players[next.turn];
-    const logName = player.name;
-
-    if (action.type === 'drawDeck' && !next.drawn && next.pendingReveal === undefined) {
-      next.drawn = next.deck.pop();
-      next.log = [`${logName} draws from the deck.`, ...next.log];
-      return next;
-    }
-
-    if (action.type === 'drawDiscard' && !next.drawn && next.discard.length && next.pendingReveal === undefined) {
-      next.drawn = next.discard.pop();
-      next.log = [`${logName} takes the discard.`, ...next.log];
-      return next;
-    }
-
-    if (action.type === 'replace' && next.drawn && Number.isInteger(action.index)) {
-      if (variant.lockRevealedCards && player.revealed[action.index]) return prev;
-      const old = player.cards[action.index];
-      player.cards[action.index] = next.drawn;
-      player.revealed[action.index] = true;
-      player.known[action.index] = true;
-      next.discard.push(old);
-      next.drawn = null;
-      advanceTurn(next, `${logName} replaces a card.`);
-      return next;
-    }
-
-    if (action.type === 'discardDrawn' && next.drawn) {
-      next.discard.push(next.drawn);
-      next.drawn = null;
-      if (variant.discardRequiresReveal && player.revealed.includes(false)) {
-        next.pendingReveal = next.turn;
-        next.log = [`${logName} discards the drawn card and must reveal one hidden card.`, ...next.log];
-        return next;
-      }
-      advanceTurn(next, `${logName} discards the drawn card.`);
-      return next;
-    }
-
-    if (action.type === 'reveal' && !next.drawn && Number.isInteger(action.index)) {
-      if (next.pendingReveal !== undefined && next.pendingReveal !== next.turn) return prev;
-      if (player.revealed[action.index]) return prev;
-      player.revealed[action.index] = true;
-      player.known[action.index] = true;
-      if (next.pendingReveal !== undefined) {
-        delete next.pendingReveal;
-      }
-      advanceTurn(next, `${logName} reveals a card.`);
-      return next;
-    }
-
-    return prev;
-  }
-
-  function advanceTurn(next, log) {
-    if (!next.players[next.turn].revealed.includes(false)) {
-      next.players[next.turn].knocked = true;
-    }
-    const allDone = next.players.every((player) => !player.revealed.includes(false));
-    if (allDone) {
-      const variant = GAME_VARIANTS[next.variantKey] || DEFAULT_VARIANT;
-      const roundScores = resolveRoundScores(next.players, variant);
-      const totalScores = Object.fromEntries(
-        next.players.map((player) => [player.id, (next.match?.totalScores?.[player.id] || 0) + roundScores[player.id]]),
-      );
-      const scoreLimitReached = next.match?.scoreLimit && Object.values(totalScores).some((score) => score >= next.match.scoreLimit);
-      const roundLimitReached = next.match?.roundLimit && next.match.roundNumber >= next.match.roundLimit;
-      next.status = 'complete';
-      next.match = {
-        ...(next.match || {}),
-        roundScores,
-        totalScores,
-        complete: Boolean(scoreLimitReached || roundLimitReached),
-      };
-      next.log = [
-        next.match.complete ? `Game complete. Lowest total score wins.` : `Round complete. Lowest total score wins after all rounds.`,
-        log,
-        ...next.log,
-      ];
-      return;
-    }
-    next.turn = (next.turn + 1) % next.players.length;
-    next.log = [log, `${next.players[next.turn].name}'s turn.`, ...next.log];
+    setGame((prev) => ACTIVE_GAME.reduceGame(prev, action, actorId));
   }
 
   function runBotTurn() {
-    if (!game) return;
-    const player = game.players[game.turn];
-    if (!player || player.type !== 'bot') return;
-    if (game.pendingReveal === game.turn) {
-      const reveal = chooseBotReveal(player, activeVariant);
-      if (reveal) applyAction({ type: 'reveal', index: reveal.index }, player.id);
-      return;
-    }
-
-    if (game.drawn) {
-      const target = findBotReplacement(player, game.drawn, activeVariant);
-      applyAction(target && target.improvement > 0.25 ? { type: 'replace', index: target.index } : { type: 'discardDrawn' }, player.id);
-      return;
-    }
-
-    const topDiscard = game.discard.at(-1);
-    const discardTarget = topDiscard ? findBotReplacement(player, topDiscard, activeVariant) : null;
-    const shouldTakeDiscard =
-      discardTarget && discardTarget.improvement > 0.75 && !createsUnpairedThirdKnownRank(player, topDiscard, discardTarget.index);
-    applyAction({ type: shouldTakeDiscard ? 'drawDiscard' : 'drawDeck' }, player.id);
+    const botTurn = ACTIVE_GAME.getBotAction(game);
+    if (!botTurn) return;
+    applyAction(botTurn.action, botTurn.actorId);
   }
 
   const standings = useMemo(
@@ -727,7 +377,7 @@ export default function App() {
         ? [...game.players]
             .map((player) => ({
               ...player,
-              roundScore: game.match?.roundScores?.[player.id] ?? scoreCards(player.cards, activeVariant),
+              roundScore: game.match?.roundScores?.[player.id] ?? ACTIVE_GAME.scoreCards(player.cards, activeVariant),
               totalScore: game.match?.totalScores?.[player.id] ?? 0,
             }))
             .sort((a, b) => a.totalScore - b.totalScore)
@@ -736,25 +386,11 @@ export default function App() {
   );
 
   const rulesModalNode = (
-    <Modal opened={rulesOpened} onClose={rulesModal.close} title="Golf rules" size="lg" centered>
+    <Modal opened={rulesOpened} onClose={rulesModal.close} title={`${ACTIVE_GAME.name} rules`} size="lg" centered>
       <Stack>
-        <Text>
-          Golf is a low-score card game. Each player has a face-down grid. On your turn, draw from the deck or take the top discard, then either
-          replace one of your grid cards or discard the drawn card. You can reveal a hidden card instead of drawing.
-        </Text>
-        <Text>
-          Card values: King is 0, Ace is 1, number cards are face value, and Jack/Queen are 10. When every card in a vertical column has the same
-          rank, that whole column scores 0.
-        </Text>
-        <Text>
-          Four-card Memory Golf uses a different score card: Jack is 0, Ace is 1, King and Queen are 10, and any same-rank pair scores 0.
-          In that variant, two face-down cards are privately shown to their owner before play starts, discarded draws must be followed by revealing
-          one hidden card, and face-up cards are locked.
-        </Text>
-        <Text>
-          A full game is played across the configured number of rounds, or until any player reaches the configured total score limit. Round scores
-          are added to each player's match total, and the lowest total wins.
-        </Text>
+        {ACTIVE_GAME.rules.map((rule) => (
+          <Text key={rule}>{rule}</Text>
+        ))}
         <Stack gap="xs">
           {Object.values(GAME_VARIANTS).map((variant) => (
             <Paper key={variant.key} withBorder p="sm" radius="sm">
@@ -777,7 +413,7 @@ export default function App() {
             <Group justify="space-between" align="start">
               <div>
                 <Text className="eyebrow">Choose a game</Text>
-                <Title order={1}>Golf Cards</Title>
+                <Title order={1}>{ACTIVE_GAME.name}</Title>
                 <Text c="rgba(255,255,255,0.78)" mt="xs">
                   Pick a table layout, then play against computers or host an online table.
                 </Text>
@@ -816,7 +452,7 @@ export default function App() {
           <div>
             <Group gap="xs" align="center">
               <IconCards size={34} stroke={1.7} />
-              <Title order={1}>Golf Cards</Title>
+              <Title order={1}>{ACTIVE_GAME.name}</Title>
             </Group>
             <Text c="dimmed" mt="xs">
               {activeVariant.name} with computer opponents and PeerJS tables.
@@ -1060,14 +696,14 @@ export default function App() {
         <section className="drawArea" aria-label="Draw area">
           <button
             className="pile deckPile"
-            style={{ backgroundImage: `url(${cardImage(null, true)})` }}
+            style={{ backgroundImage: `url(${ACTIVE_GAME.cardImage(null, true)})` }}
             onClick={() => localCanAct && applyAction({ type: 'drawDeck' })}
-            disabled={!localCanAct || Boolean(game?.drawn)}
+            disabled={!localCanAct || Boolean(game?.drawn) || !ACTIVE_GAME.canDrawFromDeck(game)}
             aria-label="Draw from deck"
           />
           <button
             className="pile discardPile"
-            style={{ backgroundImage: `url(${cardImage(game?.discard.at(-1))})` }}
+            style={{ backgroundImage: `url(${ACTIVE_GAME.cardImage(game?.discard.at(-1))})` }}
             onClick={() => localCanAct && applyAction({ type: 'drawDiscard' })}
             disabled={!localCanAct || Boolean(game?.drawn) || !game?.discard.length}
             aria-label="Draw from discard"
@@ -1076,7 +712,7 @@ export default function App() {
             <Text className="eyebrow">In hand</Text>
             <button
               className={`cardButton ${visibleDrawn ? '' : 'placeholder'}`}
-              style={{ backgroundImage: visibleDrawn ? `url(${cardImage(game.drawn)})` : undefined }}
+              style={{ backgroundImage: visibleDrawn ? `url(${ACTIVE_GAME.cardImage(game.drawn)})` : undefined }}
               aria-label="Drawn card"
               disabled
             />
@@ -1106,7 +742,7 @@ export default function App() {
                   </Text>
                 </div>
                 <Badge color="gray" size="lg">
-                  {game?.status === 'complete' ? 'Final' : 'Shown'}: {visibleScore(player, activeVariant, game?.status === 'complete')} · Total:{' '}
+                  {game?.status === 'complete' ? 'Final' : 'Shown'}: {ACTIVE_GAME.visibleScore(player, activeVariant, game?.status === 'complete')} · Total:{' '}
                   {game?.match?.totalScores?.[player.id] || 0}
                 </Badge>
               </Group>
@@ -1126,7 +762,7 @@ export default function App() {
                     <button
                       key={`${card.id}-${index}`}
                       className={`cardButton ${selectable ? 'selectable' : ''}`}
-                      style={{ backgroundImage: `url(${cardImage(card, !visible)})` }}
+                      style={{ backgroundImage: `url(${ACTIVE_GAME.cardImage(card, !visible)})` }}
                       disabled={!selectable}
                       aria-label={`${player.name} card ${index + 1}`}
                       onClick={() => applyAction(game?.drawn ? { type: 'replace', index } : { type: 'reveal', index })}

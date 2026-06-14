@@ -8,4 +8,19 @@ export default defineConfig({
   define: {
     __APP_COMMIT__: JSON.stringify(gitCommit),
   },
+  build: {
+    rollupOptions: {
+      onwarn(warning, defaultHandler) {
+        if (
+          warning.code === 'MODULE_LEVEL_DIRECTIVE' &&
+          warning.message.includes('"use client"') &&
+          warning.id?.includes('/node_modules/@mantine/')
+        ) {
+          return
+        }
+
+        defaultHandler(warning)
+      },
+    },
+  },
 })
