@@ -204,6 +204,7 @@ export function dealPlayers(players, variant = defaultVariant, matchConfig = {},
   const preview = variant.initialKnown > 0;
   const discard = [deck.pop()];
   return {
+    gameKey: golfGame.key,
     players: nextPlayers,
     deck,
     discard,
@@ -393,6 +394,78 @@ export function getBotAction(game) {
   return { action: { type: shouldTakeDiscard ? 'drawDiscard' : 'drawDeck' }, actorId: player.id };
 }
 
+export function getTableActions(game) {
+  if (!game || game.status !== 'playing') return [];
+  return [
+    {
+      key: 'drawDeck',
+      label: 'Draw deck',
+      action: { type: 'drawDeck' },
+      disabled: Boolean(game.drawn) || !canDrawFromDeck(game),
+      image: cardImage(null, true),
+      className: 'pile deckPile',
+    },
+    {
+      key: 'drawDiscard',
+      label: 'Draw discard',
+      action: { type: 'drawDiscard' },
+      disabled: Boolean(game.drawn) || !game.discard.length,
+      image: cardImage(game.discard.at(-1)),
+      className: 'pile discardPile',
+    },
+  ];
+}
+
+export function getHandAction(game, player, index, context = {}) {
+  const { localCanAct = false, isLocalPlayer = false, playerIndex = -1 } = context;
+  const variant = variantFor(game);
+  const visible =
+    player.revealed[index] ||
+    game?.status === 'complete' ||
+    (game?.status === 'preview' && isLocalPlayer && !player.ready && player.known?.[index]) ||
+    (isLocalPlayer && variant.showOwnHidden !== false);
+  const cardIsLocked = variant.lockRevealedCards && player.revealed[index];
+  const selectable =
+    localCanAct &&
+    playerIndex === game?.turn &&
+    (game?.pendingReveal === game?.turn ? !player.revealed[index] : game?.drawn ? !cardIsLocked : !player.revealed[index]);
+
+  return {
+    action: game?.drawn ? { type: 'replace', index } : { type: 'reveal', index },
+    selectable,
+    visible,
+  };
+}
+
+export function getRoundBanner(game, isLocalPlayer) {
+  if (game?.status !== 'preview') return null;
+  return {
+    title: 'Memorize your shown cards',
+    body: 'Hide them when you are ready. Normal play starts after every player is ready.',
+    action:
+      game.players.some((player) => isLocalPlayer(player) && !player.ready)
+        ? { label: 'Hide cards and start', action: { type: 'ready' } }
+        : null,
+  };
+}
+
+export function getPlayerSummary(player, game, variant = defaultVariant) {
+  return `${game?.status === 'complete' ? 'Final' : 'Shown'}: ${visibleScore(player, variant, game?.status === 'complete')} · Total: ${
+    game?.match?.totalScores?.[player.id] || 0
+  }`;
+}
+
+export function getStandings(game, variant = defaultVariant) {
+  if (!game) return [];
+  return [...game.players]
+    .map((player) => ({
+      ...player,
+      roundScore: game.match?.roundScores?.[player.id] ?? scoreCards(player.cards, variant),
+      totalScore: game.match?.totalScores?.[player.id] ?? 0,
+    }))
+    .sort((a, b) => a.totalScore - b.totalScore);
+}
+
 export const golfGame = {
   key: 'golf',
   name: 'Golf Cards',
@@ -404,6 +477,11 @@ export const golfGame = {
   dealPlayers,
   gameForPlayer,
   getBotAction,
+  getHandAction,
+  getPlayerSummary,
+  getRoundBanner,
+  getStandings,
+  getTableActions,
   reduceGame,
   scoreCards,
   visibleScore,

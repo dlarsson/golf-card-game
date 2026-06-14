@@ -30,11 +30,8 @@ import {
   IconUsers,
 } from '@tabler/icons-react';
 import { Peer } from 'peerjs';
-import { defaultGame } from './games';
+import { defaultGame, gameModules } from './games';
 
-const ACTIVE_GAME = defaultGame;
-const GAME_VARIANTS = ACTIVE_GAME.variants;
-const DEFAULT_VARIANT = ACTIVE_GAME.defaultVariant;
 const DEFAULT_PLAYER_NAME = 'Player 1';
 const APP_COMMIT = __APP_COMMIT__;
 
@@ -113,8 +110,8 @@ export default function App() {
   const [scoreLimit, setScoreLimit] = useState(100);
   const [playerName, setPlayerName] = useLocalStorage({ key: 'golf-player-name', defaultValue: DEFAULT_PLAYER_NAME });
   const [rulesOpened, rulesModal] = useDisclosure(false);
+  const [selectedGameModuleKey, setSelectedGameModuleKey] = useState(defaultGame.key);
   const [selectedGameKey, setSelectedGameKey] = useState('');
-  const selectedGame = GAME_VARIANTS[selectedGameKey] || null;
   const [game, setGame] = useState(null);
   const [network, setNetwork] = useState({ role: 'offline', peerId: '', connections: [], status: 'No online table yet.', lobbyOpen: false });
   const [joinCode, setJoinCode] = useState('');
@@ -126,6 +123,10 @@ export default function App() {
   const gameRef = useRef(null);
   const lobbyOpenRef = useRef(false);
 
+  const ACTIVE_GAME = gameModules[game?.gameKey || selectedGameModuleKey] || defaultGame;
+  const GAME_VARIANTS = ACTIVE_GAME.variants;
+  const DEFAULT_VARIANT = ACTIVE_GAME.defaultVariant;
+  const selectedGame = GAME_VARIANTS[selectedGameKey] || null;
   const activeVariant = GAME_VARIANTS[game?.variantKey] || selectedGame || DEFAULT_VARIANT;
   const currentPlayer = game?.players[game.turn];
   const activeLobbyConnections = network.connections.filter((conn) => conn.open !== false);
@@ -134,6 +135,9 @@ export default function App() {
   const lobbySeatCount = joinedPlayers.length + invitedBots.length;
   const matchConfig = { roundLimit, scoreLimit };
   const localPlayerName = playerNameOrDefault(playerName);
+  const maxPlayerCount = ACTIVE_GAME.maxPlayers || 4;
+  const maxComputerPlayers = Math.max(1, maxPlayerCount - 1);
+  const maxOnlineBotCount = Math.max(0, maxPlayerCount - joinedPlayers.length - 1);
   const isLocalPlayer = (player) => {
     if (!player) return false;
     if (mode !== 'online') return player.type === 'human';
@@ -143,15 +147,22 @@ export default function App() {
   };
   const localCanAct = game?.status === 'playing' && isLocalPlayer(currentPlayer);
   const visibleDrawn = game?.drawn && (isLocalPlayer(currentPlayer) || game.status === 'complete');
+  const tableActions = ACTIVE_GAME.getTableActions(game);
+  const roundBanner = ACTIVE_GAME.getRoundBanner(game, isLocalPlayer);
   const gameLink =
     network.role === 'host' && network.peerId
-      ? `${window.location.origin}${window.location.pathname}?game=${network.peerId}&variant=${activeVariant.key}`
+      ? `${window.location.origin}${window.location.pathname}?game=${network.peerId}&type=${ACTIVE_GAME.key}&variant=${activeVariant.key}`
       : '';
 
   useEffect(() => {
     const gameId = new URLSearchParams(window.location.search).get('game');
+    const gameType = new URLSearchParams(window.location.search).get('type');
     const variantKey = new URLSearchParams(window.location.search).get('variant');
-    if (variantKey && GAME_VARIANTS[variantKey]) {
+    const gameModule = gameModules[gameType] || defaultGame;
+    if (gameType && gameModules[gameType]) {
+      setSelectedGameModuleKey(gameType);
+    }
+    if (variantKey && gameModule.variants[variantKey]) {
       setSelectedGameKey(variantKey);
     }
     if (gameId) {
@@ -203,30 +214,33 @@ export default function App() {
   }, [game, localPlayerName, invitedGameId, matchConfig, selectedGame]);
 
   useEffect(() => {
-    if (currentPlayer?.type !== 'bot' || game?.status !== 'playing') return;
+    if (!ACTIVE_GAME.getBotAction(game)) return;
     const timeout = window.setTimeout(() => runBotTurn(), 700);
     return () => window.clearTimeout(timeout);
-  }, [currentPlayer?.id, game?.status, game?.drawn, game?.pendingReveal]);
+  }, [ACTIVE_GAME, currentPlayer?.id, game?.status, game?.drawn, game?.pendingReveal, game?.players]);
 
   function appendLog(message) {
     setGame((prev) => (prev ? { ...prev, log: [message, ...prev.log].slice(0, 30) } : prev));
   }
 
-  function chooseGame(variantKey) {
-    const variant = GAME_VARIANTS[variantKey];
+  function chooseGame(variantKey, gameModuleKey = selectedGameModuleKey) {
+    const gameModule = gameModules[gameModuleKey] || defaultGame;
+    const variant = gameModule.variants[variantKey];
     if (!variant) return;
     closeNetwork();
+    setSelectedGameModuleKey(gameModule.key);
     setSelectedGameKey(variantKey);
     setMode('computer');
     setSetupVisible(true);
     const players = distinctPlayerNames([defaultPlayer(localPlayerName, 'host', 'human'), defaultPlayer('Computer 1', 'bot-1', 'bot')]);
-    setGame(ACTIVE_GAME.dealPlayers(players, variant, matchConfig));
+    setGame(gameModule.dealPlayers(players, variant, matchConfig));
   }
 
   function startComputerGame() {
     closeNetwork();
     const humans = [defaultPlayer(localPlayerName, 'host', 'human')];
-    const bots = Array.from({ length: botCount }, (_, index) => defaultPlayer(`Computer ${index + 1}`, `bot-${index + 1}`, 'bot'));
+    const clampedBotCount = Math.min(botCount, maxComputerPlayers);
+    const bots = Array.from({ length: clampedBotCount }, (_, index) => defaultPlayer(`Computer ${index + 1}`, `bot-${index + 1}`, 'bot'));
     setMode('computer');
     setGame(ACTIVE_GAME.dealPlayers(distinctPlayerNames([...humans, ...bots]), activeVariant, matchConfig));
   }
@@ -242,7 +256,8 @@ export default function App() {
     const remotePlayers = activeConnections.map((conn, index) =>
       defaultPlayer(conn.metadata?.name, conn.peer, 'remote', `Player ${index + 2}`),
     );
-    const botPlayers = Array.from({ length: onlineBotCount }, (_, index) => defaultPlayer(`Computer ${index + 1}`, `bot-${index + 1}`, 'bot'));
+    const clampedOnlineBotCount = Math.min(onlineBotCount, maxOnlineBotCount);
+    const botPlayers = Array.from({ length: clampedOnlineBotCount }, (_, index) => defaultPlayer(`Computer ${index + 1}`, `bot-${index + 1}`, 'bot'));
     const players = distinctPlayerNames([defaultPlayer(localPlayerName, 'host', 'human'), ...remotePlayers, ...botPlayers]);
     setGame(ACTIVE_GAME.dealPlayers(players, activeVariant, matchConfig));
     setSetupVisible(false);
@@ -372,17 +387,8 @@ export default function App() {
   }
 
   const standings = useMemo(
-    () =>
-      game
-        ? [...game.players]
-            .map((player) => ({
-              ...player,
-              roundScore: game.match?.roundScores?.[player.id] ?? ACTIVE_GAME.scoreCards(player.cards, activeVariant),
-              totalScore: game.match?.totalScores?.[player.id] ?? 0,
-            }))
-            .sort((a, b) => a.totalScore - b.totalScore)
-        : [],
-    [activeVariant, game],
+    () => ACTIVE_GAME.getStandings(game, activeVariant),
+    [ACTIVE_GAME, activeVariant, game],
   );
 
   const rulesModalNode = (
@@ -425,17 +431,24 @@ export default function App() {
                 Rules
               </Button>
           </Group>
-          <div className="choiceGrid">
-            {Object.values(GAME_VARIANTS).map((variant) => (
-              <button key={variant.key} className="gameChoice" onClick={() => chooseGame(variant.key)}>
-                <Text fw={800}>{variant.name}</Text>
-                <Text size="sm">{variant.subtitle}</Text>
-                <Badge variant="light" mt="md">
-                  {variant.rows} x {variant.columns}
-                </Badge>
-              </button>
-            ))}
-          </div>
+          {Object.values(gameModules).map((gameModule) => (
+            <div key={gameModule.key}>
+              <Title order={2} mt="xl">
+                {gameModule.name}
+              </Title>
+              <div className="choiceGrid">
+                {Object.values(gameModule.variants).map((variant) => (
+                  <button key={`${gameModule.key}-${variant.key}`} className="gameChoice" onClick={() => chooseGame(variant.key, gameModule.key)}>
+                    <Text fw={800}>{variant.name}</Text>
+                    <Text size="sm">{variant.subtitle}</Text>
+                    <Badge variant="light" mt="md">
+                      {variant.rows} x {variant.columns}
+                    </Badge>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
         </section>
         {rulesModalNode}
       </main>
@@ -468,10 +481,23 @@ export default function App() {
             </Group>
             <SegmentedControl
               fullWidth
+              mb="sm"
+              value={ACTIVE_GAME.key}
+              onChange={(gameModuleKey) => {
+                const nextGame = gameModules[gameModuleKey] || defaultGame;
+                chooseGame(nextGame.defaultVariant.key, nextGame.key);
+              }}
+              data={Object.values(gameModules).map((gameModule) => ({
+                label: gameModule.name,
+                value: gameModule.key,
+              }))}
+            />
+            <SegmentedControl
+              fullWidth
               value={activeVariant.key}
-              onChange={chooseGame}
+              onChange={(variantKey) => chooseGame(variantKey, ACTIVE_GAME.key)}
               data={Object.values(GAME_VARIANTS).map((variant) => ({
-                label: variant.rows * variant.columns,
+                label: variant.name,
                 value: variant.key,
               }))}
             />
@@ -525,7 +551,13 @@ export default function App() {
             />
             {mode === 'computer' ? (
               <Stack mt="md">
-                <NumberInput label="Computer players" min={1} max={3} value={botCount} onChange={(value) => setBotCount(value || 1)} />
+                <NumberInput
+                  label="Computer players"
+                  min={1}
+                  max={maxComputerPlayers}
+                  value={Math.min(botCount, maxComputerPlayers)}
+                  onChange={(value) => setBotCount(value || 1)}
+                />
                 <Button leftSection={<IconPlayerPlay size={18} />} onClick={startComputerGame}>
                   Start game
                 </Button>
@@ -545,8 +577,8 @@ export default function App() {
                   <NumberInput
                     label="Computer players"
                     min={0}
-                    max={3}
-                    value={onlineBotCount}
+                    max={maxOnlineBotCount}
+                    value={Math.min(onlineBotCount, maxOnlineBotCount)}
                     onChange={(value) => setOnlineBotCount(value || 0)}
                   />
                 )}
@@ -677,56 +709,54 @@ export default function App() {
           </Paper>
         )}
 
-        {game?.status === 'preview' && (
+        {roundBanner && (
           <Paper className="standings" withBorder p="md">
             <Group justify="space-between" align="center">
               <div>
-                <Text fw={800}>Memorize your shown cards</Text>
+                <Text fw={800}>{roundBanner.title}</Text>
                 <Text size="sm" c="dimmed">
-                  Hide them when you are ready. Normal play starts after every player is ready.
+                  {roundBanner.body}
                 </Text>
               </div>
-              {game.players.some((player) => isLocalPlayer(player) && !player.ready) && (
-                <Button onClick={() => applyAction({ type: 'ready' })}>Hide cards and start</Button>
-              )}
+              {roundBanner.action && <Button onClick={() => applyAction(roundBanner.action.action)}>{roundBanner.action.label}</Button>}
             </Group>
           </Paper>
         )}
 
-        <section className="drawArea" aria-label="Draw area">
-          <button
-            className="pile deckPile"
-            style={{ backgroundImage: `url(${ACTIVE_GAME.cardImage(null, true)})` }}
-            onClick={() => localCanAct && applyAction({ type: 'drawDeck' })}
-            disabled={!localCanAct || Boolean(game?.drawn) || !ACTIVE_GAME.canDrawFromDeck(game)}
-            aria-label="Draw from deck"
-          />
-          <button
-            className="pile discardPile"
-            style={{ backgroundImage: `url(${ACTIVE_GAME.cardImage(game?.discard.at(-1))})` }}
-            onClick={() => localCanAct && applyAction({ type: 'drawDiscard' })}
-            disabled={!localCanAct || Boolean(game?.drawn) || !game?.discard.length}
-            aria-label="Draw from discard"
-          />
-          <div className="drawnSlot">
-            <Text className="eyebrow">In hand</Text>
-            <button
-              className={`cardButton ${visibleDrawn ? '' : 'placeholder'}`}
-              style={{ backgroundImage: visibleDrawn ? `url(${ACTIVE_GAME.cardImage(game.drawn)})` : undefined }}
-              aria-label="Drawn card"
-              disabled
-            />
-            <Button
-              size="xs"
-              variant="default"
-              leftSection={<IconTrash size={15} />}
-              disabled={!localCanAct || !game?.drawn}
-              onClick={() => applyAction({ type: 'discardDrawn' })}
-            >
-              Discard
-            </Button>
-          </div>
-        </section>
+        {(tableActions.length > 0 || visibleDrawn) && (
+          <section className="drawArea" aria-label="Table actions">
+            {tableActions.map((tableAction) => (
+              <button
+                key={tableAction.key}
+                className={tableAction.className || 'pile'}
+                style={{ backgroundImage: tableAction.image ? `url(${tableAction.image})` : undefined }}
+                onClick={() => localCanAct && applyAction(tableAction.action)}
+                disabled={!localCanAct || tableAction.disabled}
+                aria-label={tableAction.label}
+              />
+            ))}
+            {visibleDrawn && (
+              <div className="drawnSlot">
+                <Text className="eyebrow">In hand</Text>
+                <button
+                  className="cardButton"
+                  style={{ backgroundImage: `url(${ACTIVE_GAME.cardImage(game.drawn)})` }}
+                  aria-label="Drawn card"
+                  disabled
+                />
+                <Button
+                  size="xs"
+                  variant="default"
+                  leftSection={<IconTrash size={15} />}
+                  disabled={!localCanAct || !game?.drawn}
+                  onClick={() => applyAction({ type: 'discardDrawn' })}
+                >
+                  Discard
+                </Button>
+              </div>
+            )}
+          </section>
+        )}
 
         <section className="players">
           {game?.players.map((player, playerIndex) => (
@@ -742,30 +772,25 @@ export default function App() {
                   </Text>
                 </div>
                 <Badge color="gray" size="lg">
-                  {game?.status === 'complete' ? 'Final' : 'Shown'}: {ACTIVE_GAME.visibleScore(player, activeVariant, game?.status === 'complete')} · Total:{' '}
-                  {game?.match?.totalScores?.[player.id] || 0}
+                  {ACTIVE_GAME.getPlayerSummary(player, game, activeVariant)}
                 </Badge>
               </Group>
               <div className="cardGrid" style={{ '--grid-columns': activeVariant.columns }}>
                 {player.cards.map((card, index) => {
-                  const visible =
-                    player.revealed[index] ||
-                    game?.status === 'complete' ||
-                    (game?.status === 'preview' && isLocalPlayer(player) && !player.ready && player.known?.[index]) ||
-                    (isLocalPlayer(player) && activeVariant.showOwnHidden !== false);
-                  const cardIsLocked = activeVariant.lockRevealedCards && player.revealed[index];
-                  const selectable =
-                    localCanAct &&
-                    playerIndex === game?.turn &&
-                    (game?.pendingReveal === game?.turn ? !player.revealed[index] : game?.drawn ? !cardIsLocked : !player.revealed[index]);
+                  const handAction = ACTIVE_GAME.getHandAction(game, player, index, {
+                    activeVariant,
+                    isLocalPlayer: isLocalPlayer(player),
+                    localCanAct,
+                    playerIndex,
+                  });
                   return (
                     <button
                       key={`${card.id}-${index}`}
-                      className={`cardButton ${selectable ? 'selectable' : ''}`}
-                      style={{ backgroundImage: `url(${ACTIVE_GAME.cardImage(card, !visible)})` }}
-                      disabled={!selectable}
+                      className={`cardButton ${handAction.selectable ? 'selectable' : ''} ${handAction.selected ? 'selected' : ''}`}
+                      style={{ backgroundImage: `url(${ACTIVE_GAME.cardImage(card, !handAction.visible)})` }}
+                      disabled={!handAction.selectable}
                       aria-label={`${player.name} card ${index + 1}`}
-                      onClick={() => applyAction(game?.drawn ? { type: 'replace', index } : { type: 'reveal', index })}
+                      onClick={() => applyAction(handAction.action)}
                     />
                   );
                 })}
