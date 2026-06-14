@@ -219,6 +219,35 @@ button {
   max-width: 340px;
 }
 
+.playedPile {
+  display: grid;
+  gap: 5px;
+  margin-bottom: 10px;
+}
+
+.playedPileCard {
+  position: relative;
+  width: clamp(42px, 18vw, 72px);
+}
+
+.playedPileCard .cardButton,
+.emptyPlayedCard {
+  width: 100%;
+}
+
+.emptyPlayedCard {
+  aspect-ratio: 5 / 7;
+  border: 1px dashed rgba(255, 255, 255, 0.42);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.playedCount {
+  position: absolute;
+  right: -8px;
+  bottom: -6px;
+}
+
 .cardGrid .cardButton {
   width: 100%;
   cursor: pointer;
@@ -363,6 +392,14 @@ button {
     max-width: none;
     grid-template-columns: repeat(var(--grid-columns, 3), minmax(0, 1fr));
     gap: 6px;
+  }
+
+  .playedPile {
+    margin-bottom: 8px;
+  }
+
+  .playedPileCard {
+    width: clamp(38px, 15vw, 54px);
   }
 
   .logPanel {

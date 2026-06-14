@@ -144,6 +144,7 @@ export function dealPlayers(players, variant = defaultVariant, matchConfig = {},
     known: Array.from({ length: HAND_SIZE }, () => true),
     ready: player.type === 'bot',
     selectedSwap: [],
+    playedCards: [],
     knocked: false,
   }));
 
@@ -221,6 +222,7 @@ export function reduceGame(prev, action, actorId) {
 
   const [playedCard] = active.cards.splice(action.index, 1);
   active.cards = sortHand(active.cards);
+  active.playedCards = [...(active.playedCards || []), playedCard];
   next.discard.push(playedCard);
 
   let startsNewRound = false;
@@ -313,6 +315,14 @@ export function getHandAction(game, player, index, context = {}) {
   };
 }
 
+export function getPlayedPile(game, player) {
+  if (!game || game.gameKey !== gurkaGame.key) return null;
+  return {
+    label: 'Played',
+    cards: player.playedCards || [],
+  };
+}
+
 export function getRoundBanner(game, isLocalPlayer) {
   if (game?.status === 'swap') {
     const player = game.players.find((item) => isLocalPlayer(item));
@@ -382,6 +392,7 @@ export const gurkaGame = {
   getBotAction,
   getHandAction,
   getPlayerSummary,
+  getPlayedPile,
   getRoundBanner,
   getStandings,
   getTableActions,

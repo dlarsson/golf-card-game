@@ -759,44 +759,66 @@ export default function App() {
         )}
 
         <section className="players">
-          {game?.players.map((player, playerIndex) => (
-            <Paper key={player.id} className={`playerBoard ${playerIndex === game.turn ? 'active' : ''}`} withBorder>
-              <Group className="playerHeader" justify="space-between" mb="sm">
-                <div>
-                  <Group gap="xs">
-                    <Title order={3}>{player.name}</Title>
-                    {isLocalPlayer(player) && <Badge color="yellow">Your hand</Badge>}
-                  </Group>
-                  <Text size="sm" c="rgba(255,255,255,0.74)">
-                    {isLocalPlayer(player) ? 'You' : player.type === 'bot' ? 'Computer' : player.type === 'remote' ? 'Remote player' : 'Opponent'}
-                  </Text>
+          {game?.players.map((player, playerIndex) => {
+            const playedPile = ACTIVE_GAME.getPlayedPile?.(game, player);
+            const lastPlayedCard = playedPile?.cards?.at(-1);
+            return (
+              <Paper key={player.id} className={`playerBoard ${playerIndex === game.turn ? 'active' : ''}`} withBorder>
+                <Group className="playerHeader" justify="space-between" mb="sm">
+                  <div>
+                    <Group gap="xs">
+                      <Title order={3}>{player.name}</Title>
+                      {isLocalPlayer(player) && <Badge color="yellow">Your hand</Badge>}
+                    </Group>
+                    <Text size="sm" c="rgba(255,255,255,0.74)">
+                      {isLocalPlayer(player) ? 'You' : player.type === 'bot' ? 'Computer' : player.type === 'remote' ? 'Remote player' : 'Opponent'}
+                    </Text>
+                  </div>
+                  <Badge className="playerSummary" color="gray" size="lg">
+                    {ACTIVE_GAME.getPlayerSummary(player, game, activeVariant)}
+                  </Badge>
+                </Group>
+                {playedPile && (
+                  <div className="playedPile">
+                    <Text className="eyebrow">{playedPile.label}</Text>
+                    <div className="playedPileCard">
+                      {lastPlayedCard ? (
+                        <button
+                          className="cardButton"
+                          style={{ backgroundImage: `url(${ACTIVE_GAME.cardImage(lastPlayedCard)})` }}
+                          aria-label={`${player.name} last played card`}
+                          disabled
+                        />
+                      ) : (
+                        <div className="emptyPlayedCard" aria-label={`${player.name} has not played a card yet`} />
+                      )}
+                      {playedPile.cards.length > 1 && <Badge className="playedCount">{playedPile.cards.length}</Badge>}
+                    </div>
+                  </div>
+                )}
+                <div className="cardGrid" style={{ '--grid-columns': activeVariant.columns }}>
+                  {player.cards.map((card, index) => {
+                    const handAction = ACTIVE_GAME.getHandAction(game, player, index, {
+                      activeVariant,
+                      isLocalPlayer: isLocalPlayer(player),
+                      localCanAct,
+                      playerIndex,
+                    });
+                    return (
+                      <button
+                        key={`${card.id}-${index}`}
+                        className={`cardButton ${handAction.selectable ? 'selectable' : ''} ${handAction.selected ? 'selected' : ''}`}
+                        style={{ backgroundImage: `url(${ACTIVE_GAME.cardImage(card, !handAction.visible)})` }}
+                        disabled={!handAction.selectable}
+                        aria-label={`${player.name} card ${index + 1}`}
+                        onClick={() => applyAction(handAction.action)}
+                      />
+                    );
+                  })}
                 </div>
-                <Badge className="playerSummary" color="gray" size="lg">
-                  {ACTIVE_GAME.getPlayerSummary(player, game, activeVariant)}
-                </Badge>
-              </Group>
-              <div className="cardGrid" style={{ '--grid-columns': activeVariant.columns }}>
-                {player.cards.map((card, index) => {
-                  const handAction = ACTIVE_GAME.getHandAction(game, player, index, {
-                    activeVariant,
-                    isLocalPlayer: isLocalPlayer(player),
-                    localCanAct,
-                    playerIndex,
-                  });
-                  return (
-                    <button
-                      key={`${card.id}-${index}`}
-                      className={`cardButton ${handAction.selectable ? 'selectable' : ''} ${handAction.selected ? 'selected' : ''}`}
-                      style={{ backgroundImage: `url(${ACTIVE_GAME.cardImage(card, !handAction.visible)})` }}
-                      disabled={!handAction.selectable}
-                      aria-label={`${player.name} card ${index + 1}`}
-                      onClick={() => applyAction(handAction.action)}
-                    />
-                  );
-                })}
-              </div>
-            </Paper>
-          ))}
+              </Paper>
+            );
+          })}
         </section>
 
         <Card withBorder className="logPanel">
