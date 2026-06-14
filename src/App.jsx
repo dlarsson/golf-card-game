@@ -201,6 +201,7 @@ function chooseBotReveal(player, variant = DEFAULT_VARIANT) {
 function dealPlayers(players, variant = DEFAULT_VARIANT, matchConfig = {}, previousMatch = null) {
   const deck = createDeck();
   const cardCount = variant.rows * variant.columns;
+  const startingTurn = previousMatch ? previousMatch.roundNumber % players.length : 0;
   const nextPlayers = players.map((player) => ({
     ...player,
     cards: Array.from({ length: cardCount }, () => deck.pop()),
@@ -216,9 +217,9 @@ function dealPlayers(players, variant = DEFAULT_VARIANT, matchConfig = {}, previ
     deck,
     discard,
     drawn: null,
-    turn: 0,
+    turn: startingTurn,
     status: preview ? 'preview' : 'playing',
-    log: preview ? ['Review your two known cards, then hide them to start.'] : [`${nextPlayers[0].name} starts the round.`],
+    log: preview ? ['Review your two known cards, then hide them to start.'] : [`${nextPlayers[startingTurn].name} starts the round.`],
     round: crypto.randomUUID(),
     variantKey: variant.key,
     match: {
