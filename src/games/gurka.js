@@ -70,6 +70,57 @@ function highestCard(cards) {
   return [...cards].sort((a, b) => rankValue(b) - rankValue(a) || b.suit.localeCompare(a.suit))[0];
 }
 
+function handRisk(cards) {
+  const values = cards.map(rankValue).sort((a, b) => b - a);
+  return values.reduce((score, value, index) => score + value * (index === 0 ? 30 : index === 1 ? 10 : 1), 0);
+}
+
+function indexesForCards(cards) {
+  return cards.map((card, index) => ({ card, index }));
+}
+
+function legalIndexesForCardSet(cards, currentCard) {
+  if (!cards.length) return [];
+  if (!currentCard) return cards.map((_, index) => index);
+
+  const sameRank = indexesForCards(cards).filter((item) => item.card.rank === currentCard.rank);
+  if (sameRank.length) return sameRank.map((item) => item.index);
+
+  const higher = indexesForCards(cards)
+    .filter((item) => rankValue(item.card) > rankValue(currentCard))
+    .sort((a, b) => rankValue(a.card) - rankValue(b.card) || a.card.suit.localeCompare(b.card.suit));
+  if (higher.length) return higher.map((item) => item.index);
+
+  return [lowestCardIndex(cards)];
+}
+
+function bestBotPlayIndex(game, player, legalIndexes) {
+  if (legalIndexes.length === 1) return legalIndexes[0];
+
+  const rankedCandidates = legalIndexes.map((index) => {
+    const playedCard = player.cards[index];
+    const remainingCards = player.cards.filter((_, cardIndex) => cardIndex !== index);
+
+    if (remainingCards.length <= 1) {
+      return { index, score: handRisk(remainingCards), playedValue: rankValue(playedCard) };
+    }
+
+    const likelyNextCard = game.currentCard ? playedCard : null;
+    const futureLegal = legalIndexesForCardSet(remainingCards, likelyNextCard);
+    const futureRisk = Math.min(
+      ...futureLegal.map((futureIndex) => handRisk(remainingCards.filter((_, cardIndex) => cardIndex !== futureIndex))),
+    );
+
+    return {
+      index,
+      score: futureRisk * 100 + handRisk(remainingCards),
+      playedValue: rankValue(playedCard),
+    };
+  });
+
+  return rankedCandidates.sort((a, b) => a.score - b.score || a.playedValue - b.playedValue)[0]?.index;
+}
+
 function legalCardIndexes(game, player) {
   if (!player?.cards?.length) return [];
   if (game.status === 'swap') return player.cards.map((_, index) => index);
@@ -82,16 +133,7 @@ function legalCardIndexes(game, player) {
   }
   if (!game.currentCard) return player.cards.map((_, index) => index);
 
-  const sameRank = player.cards.map((card, index) => ({ card, index })).filter((item) => item.card.rank === game.currentCard.rank);
-  if (sameRank.length) return sameRank.map((item) => item.index);
-
-  const higher = player.cards
-    .map((card, index) => ({ card, index }))
-    .filter((item) => rankValue(item.card) > rankValue(game.currentCard))
-    .sort((a, b) => rankValue(a.card) - rankValue(b.card) || a.card.suit.localeCompare(b.card.suit));
-  if (higher.length) return higher.map((item) => item.index);
-
-  return [lowestCardIndex(player.cards)];
+  return legalIndexesForCardSet(player.cards, game.currentCard);
 }
 
 function nextTurn(game, fromTurn = game.turn) {
@@ -289,7 +331,7 @@ export function getBotAction(game) {
   if (!player || player.type !== 'bot') return null;
   const legal = legalCardIndexes(game, player);
   if (!legal.length) return null;
-  return { action: { type: 'playCard', index: legal[0] }, actorId: player.id };
+  return { action: { type: 'playCard', index: bestBotPlayIndex(game, player, legal) }, actorId: player.id };
 }
 
 export function getTableActions() {
