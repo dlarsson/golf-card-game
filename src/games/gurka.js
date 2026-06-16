@@ -79,19 +79,72 @@ function indexesForCards(cards) {
   return cards.map((card, index) => ({ card, index }));
 }
 
-function legalIndexesForCardSet(cards, currentCard) {
-  if (!cards.length) return [];
-  if (!currentCard) return cards.map((_, index) => index);
+function responseForCardSet(cards, currentCard) {
+  if (!cards.length) return { indexes: [], mode: 'none' };
+  if (!currentCard) return { indexes: cards.map((_, index) => index), mode: 'any' };
 
   const sameRank = indexesForCards(cards).filter((item) => item.card.rank === currentCard.rank);
-  if (sameRank.length) return sameRank.map((item) => item.index);
+  if (sameRank.length) return { indexes: sameRank.map((item) => item.index), mode: 'same' };
 
   const higher = indexesForCards(cards)
     .filter((item) => rankValue(item.card) > rankValue(currentCard))
     .sort((a, b) => rankValue(a.card) - rankValue(b.card) || a.card.suit.localeCompare(b.card.suit));
-  if (higher.length) return higher.map((item) => item.index);
+  if (higher.length) return { indexes: higher.map((item) => item.index), mode: 'higher' };
 
-  return [lowestCardIndex(cards)];
+  return { indexes: [lowestCardIndex(cards)], mode: 'forcedLow' };
+}
+
+function legalIndexesForCardSet(cards, currentCard) {
+  return responseForCardSet(cards, currentCard).indexes;
+}
+
+function knownPlayedCards(game) {
+  if (game?.discard?.length) return game.discard;
+  return game?.players?.flatMap((player) => player.playedCards || []) || [];
+}
+
+function unseenRankCounts(game, ownCards, extraKnownCards = []) {
+  const counts = Object.fromEntries(RANKS.map((rank) => [rank, SUITS.length]));
+  [...knownPlayedCards(game), ...ownCards, ...extraKnownCards].forEach((card) => {
+    if (card?.rank && counts[card.rank] > 0) counts[card.rank] -= 1;
+  });
+  return counts;
+}
+
+function unseenCardCount(counts) {
+  return Object.values(counts).reduce((total, count) => total + count, 0);
+}
+
+function chanceAnyOpponentHas(rankCount, unseenCount, game) {
+  if (!rankCount || !unseenCount) return 0;
+  const opponentCards = game.players
+    .filter((player) => player.id !== game.players[game.turn]?.id)
+    .reduce((total, player) => total + (player.cards?.length || 0), 0);
+  return 1 - (1 - rankCount / unseenCount) ** Math.max(1, opponentCards);
+}
+
+function coverFailureRisk(game, remainingCards, playedCard) {
+  if (!remainingCards.length) return 0;
+  const coverValue = Math.max(...remainingCards.map(rankValue));
+  const counts = unseenRankCounts(game, remainingCards, [playedCard]);
+  const unseenCount = unseenCardCount(counts);
+  const higherThanCover = RANKS.slice(coverValue + 1).reduce((total, rank) => total + counts[rank], 0);
+  return chanceAnyOpponentHas(higherThanCover, unseenCount, game) * handRisk(remainingCards);
+}
+
+function twoFlushRisk(game, remainingCards, playedCard) {
+  if (remainingCards.length < 2) return 0;
+  const values = remainingCards.map(rankValue).sort((a, b) => a - b);
+  const secondLowestValue = values[1];
+  const counts = unseenRankCounts(game, remainingCards, [playedCard]);
+  return chanceAnyOpponentHas(counts['2'], unseenCardCount(counts), game) * secondLowestValue * 80;
+}
+
+function forcedLowPenalty(response, remainingCards) {
+  if (response.mode !== 'forcedLow') return 0;
+  const lowestIndex = lowestCardIndex(remainingCards);
+  const afterForcedLow = remainingCards.filter((_, index) => index !== lowestIndex);
+  return 180 + handRisk(afterForcedLow);
 }
 
 function bestBotPlayIndex(game, player, legalIndexes) {
@@ -105,15 +158,21 @@ function bestBotPlayIndex(game, player, legalIndexes) {
       return { index, score: handRisk(remainingCards), playedValue: rankValue(playedCard) };
     }
 
-    const likelyNextCard = game.currentCard ? playedCard : null;
-    const futureLegal = legalIndexesForCardSet(remainingCards, likelyNextCard);
+    const likelyNextCard = playedCard;
+    const futureResponse = responseForCardSet(remainingCards, likelyNextCard);
+    const futureLegal = futureResponse.indexes;
     const futureRisk = Math.min(
       ...futureLegal.map((futureIndex) => handRisk(remainingCards.filter((_, cardIndex) => cardIndex !== futureIndex))),
     );
 
     return {
       index,
-      score: futureRisk * 100 + handRisk(remainingCards),
+      score:
+        futureRisk * 100 +
+        handRisk(remainingCards) +
+        forcedLowPenalty(futureResponse, remainingCards) * 90 +
+        coverFailureRisk(game, remainingCards, playedCard) * 25 +
+        twoFlushRisk(game, remainingCards, playedCard),
       playedValue: rankValue(playedCard),
     };
   });

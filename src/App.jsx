@@ -117,6 +117,7 @@ export default function App() {
   const [joinCode, setJoinCode] = useState('');
   const [invitedGameId, setInvitedGameId] = useState('');
   const [setupVisible, setSetupVisible] = useState(true);
+  const [imaginaryClaim, setImaginaryClaim] = useState({ rank: 'A', suit: 'H' });
   const peerRef = useRef(null);
   const connectionsRef = useRef([]);
   const autoJoinRef = useRef(false);
@@ -145,9 +146,17 @@ export default function App() {
     if (network.role === 'guest') return player.id === network.peerId;
     return false;
   };
+  const localPlayer = game?.players.find((player) => isLocalPlayer(player));
   const localCanAct = game?.status === 'playing' && isLocalPlayer(currentPlayer);
   const visibleDrawn = game?.drawn && (isLocalPlayer(currentPlayer) || game.status === 'complete');
   const tableActions = ACTIVE_GAME.getTableActions(game);
+  const turnControls = ACTIVE_GAME.getTurnControls?.(game, {
+    claim: imaginaryClaim,
+    isLocalPlayer,
+    localCanAct,
+    localPlayer,
+    mode,
+  });
   const roundBanner = ACTIVE_GAME.getRoundBanner(game, isLocalPlayer);
   const gameLink =
     network.role === 'host' && network.peerId
@@ -758,6 +767,60 @@ export default function App() {
           </section>
         )}
 
+        {turnControls && (
+          <Paper className="standings imaginaryControls" withBorder p="md">
+            <Group justify="space-between" align="center" mb="sm">
+              <div>
+                <Text fw={800}>{turnControls.title}</Text>
+                <Text size="sm" c="dimmed">
+                  {turnControls.type === 'claim'
+                    ? `Selected claim: ${turnControls.claimLabel}`
+                    : 'Any other player may challenge before the card is accepted.'}
+                </Text>
+              </div>
+              {turnControls.type === 'claim' && <Badge size="xl">{turnControls.claimLabel}</Badge>}
+            </Group>
+            {turnControls.type === 'claim' ? (
+              <Stack gap="sm">
+                <div className="imaginaryChoiceGrid">
+                  {turnControls.ranks.map((rank) => (
+                    <Button
+                      key={rank}
+                      variant={imaginaryClaim.rank === rank ? 'filled' : 'default'}
+                      onClick={() => setImaginaryClaim((prev) => ({ ...prev, rank }))}
+                    >
+                      {rank}
+                    </Button>
+                  ))}
+                </div>
+                <div className="imaginarySuitGrid">
+                  {turnControls.suits.map((suit) => (
+                    <Button
+                      key={suit.value}
+                      variant={imaginaryClaim.suit === suit.value ? 'filled' : 'default'}
+                      onClick={() => setImaginaryClaim((prev) => ({ ...prev, suit: suit.value }))}
+                    >
+                      {suit.label}
+                    </Button>
+                  ))}
+                </div>
+                <Button disabled={!turnControls.canClaim} onClick={() => applyAction(turnControls.claimAction)}>
+                  Play claimed card
+                </Button>
+              </Stack>
+            ) : (
+              <Group>
+                <Button disabled={!turnControls.canChallenge} onClick={() => applyAction(turnControls.challengeAction)}>
+                  Challenge
+                </Button>
+                <Button variant="default" disabled={!turnControls.canAccept} onClick={() => applyAction(turnControls.acceptAction)}>
+                  No challenge
+                </Button>
+              </Group>
+            )}
+          </Paper>
+        )}
+
         <section className="players">
           {game?.players.map((player, playerIndex) => {
             const playedPile = ACTIVE_GAME.getPlayedPile?.(game, player);
@@ -795,6 +858,16 @@ export default function App() {
                       {playedPile.cards.length > 1 && <Badge className="playedCount">{playedPile.cards.length}</Badge>}
                     </div>
                   </div>
+                )}
+                {ACTIVE_GAME.key === 'imaginary-gurka' && (
+                  <Group gap="xs" mb="sm">
+                    <Badge color="red" variant="light">
+                      Successful challenges against: {player.successfulChallengesAgainst || 0}
+                    </Badge>
+                    <Badge color="orange" variant="light">
+                      Failed challenges issued: {player.failedChallengesIssued || 0}
+                    </Badge>
+                  </Group>
                 )}
                 <div className="cardGrid" style={{ '--grid-columns': activeVariant.columns }}>
                   {player.cards.map((card, index) => {

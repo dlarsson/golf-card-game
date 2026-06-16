@@ -253,6 +253,24 @@ button {
   cursor: pointer;
 }
 
+.imaginaryControls {
+  color: var(--ink);
+}
+
+.imaginaryChoiceGrid,
+.imaginarySuitGrid {
+  display: grid;
+  gap: 8px;
+}
+
+.imaginaryChoiceGrid {
+  grid-template-columns: repeat(13, minmax(38px, 1fr));
+}
+
+.imaginarySuitGrid {
+  grid-template-columns: repeat(4, minmax(44px, 1fr));
+}
+
 .cardButton.selectable {
   outline: 3px solid var(--gold);
   outline-offset: 2px;
@@ -394,6 +412,10 @@ button {
     gap: 6px;
   }
 
+  .imaginaryChoiceGrid {
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+  }
+
   .playedPile {
     margin-bottom: 8px;
   }
@@ -457,5 +479,9 @@ button {
   .cardButton.selectable,
   .cardButton.selected {
     outline-width: 2px;
+  }
+
+  .imaginaryChoiceGrid {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
   }
 }
