@@ -30,12 +30,12 @@ import {
   IconTrash,
   IconUsers,
 } from '@tabler/icons-react';
-import { Peer } from 'peerjs';
 import { defaultGame, gameModules, getGameRules, getRegisteredGameRules } from './games';
-import { createTranslator, getInitialLanguage, languageOptions, languageStorageKey } from './i18n';
+import { createTranslator, getInitialLanguage, languageOptions, languageStorageKey, loadLanguage } from './i18n';
 
 const DEFAULT_PLAYER_NAME = 'Player 1';
 const APP_COMMIT = __APP_COMMIT__;
+const APP_COMMIT_MESSAGE = __APP_COMMIT_MESSAGE__;
 
 function playerNameOrDefault(name, fallback = DEFAULT_PLAYER_NAME) {
   const trimmed = typeof name === 'string' ? name.trim() : '';
@@ -112,6 +112,7 @@ export default function App() {
   const [scoreLimit, setScoreLimit] = useState(100);
   const [playerName, setPlayerName] = useLocalStorage({ key: 'golf-player-name', defaultValue: DEFAULT_PLAYER_NAME });
   const [language, setLanguage] = useLocalStorage({ key: languageStorageKey, defaultValue: getInitialLanguage() });
+  const [loadedLanguage, setLoadedLanguage] = useState(language);
   const [rulesOpened, rulesModal] = useDisclosure(false);
   const [selectedGameModuleKey, setSelectedGameModuleKey] = useState(defaultGame.key);
   const [selectedGameKey, setSelectedGameKey] = useState('');
@@ -132,7 +133,7 @@ export default function App() {
   const DEFAULT_VARIANT = ACTIVE_GAME.defaultVariant;
   const selectedGame = GAME_VARIANTS[selectedGameKey] || null;
   const activeVariant = GAME_VARIANTS[game?.variantKey] || selectedGame || DEFAULT_VARIANT;
-  const t = useMemo(() => createTranslator(language), [language]);
+  const t = useMemo(() => createTranslator(loadedLanguage), [loadedLanguage]);
   const gameName = (gameModule) => t(`games.${gameModule.key}.name`, {}, gameModule.name);
   const variantName = (gameModule, variant) => t(`games.${gameModule.key}.variants.${variant.key}.name`, {}, variant.name);
   const variantSubtitle = (gameModule, variant) => t(`games.${gameModule.key}.variants.${variant.key}.subtitle`, {}, variant.subtitle);
@@ -193,6 +194,20 @@ export default function App() {
   useEffect(() => {
     document.documentElement.lang = language;
   }, [language]);
+
+  useEffect(() => {
+    let cancelled = false;
+    loadLanguage(language).then((activeLanguage) => {
+      if (cancelled) return;
+      setLoadedLanguage(activeLanguage);
+      if (activeLanguage !== language) {
+        setLanguage(activeLanguage);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [language, setLanguage]);
 
   useEffect(() => {
     if (!invitedGameId || autoJoinRef.current || network.role !== 'offline') return;
@@ -293,9 +308,14 @@ export default function App() {
     setGame(ACTIVE_GAME.dealPlayers(distinctPlayerNames(tablePlayersFromGame(game)), activeVariant, matchConfig, game.match));
   }
 
-  function hostGame() {
+  async function createPeer() {
+    const { Peer } = await import('peerjs');
+    return new Peer();
+  }
+
+  async function hostGame() {
     closeNetwork();
-    const peer = new Peer();
+    const peer = await createPeer();
     peerRef.current = peer;
     lobbyOpenRef.current = true;
     setNetwork({ role: 'host', peerId: '', connections: [], status: t('network.opening', {}, 'Opening host table...'), lobbyOpen: true });
@@ -330,11 +350,11 @@ export default function App() {
     peer.on('error', (error) => setNetwork((prev) => ({ ...prev, status: error.message })));
   }
 
-  function joinGame(value = joinCode) {
+  async function joinGame(value = joinCode) {
     const remoteId = parseSharedGameId(value);
     if (!remoteId) return;
     closeNetwork();
-    const peer = new Peer();
+    const peer = await createPeer();
     peerRef.current = peer;
     lobbyOpenRef.current = false;
     setNetwork({ role: 'guest', peerId: '', connections: [], status: t('network.connecting', {}, 'Connecting to host...'), lobbyOpen: false });
@@ -461,7 +481,7 @@ export default function App() {
                   {t('chooser.description', {}, 'Pick a table layout, then play against computers or host an online table.')}
                 </Text>
                 <Text size="xs" c="rgba(255,255,255,0.58)" mt={4}>
-                  {t('app.version', { version: APP_COMMIT }, `Version ${APP_COMMIT}`)}
+                  {t('app.version', { version: APP_COMMIT, message: APP_COMMIT_MESSAGE }, `Version ${APP_COMMIT} - ${APP_COMMIT_MESSAGE}`)}
                 </Text>
               </div>
               <Group align="end">
@@ -695,7 +715,7 @@ export default function App() {
             )}
           </Card>
           <Text size="xs" c="dimmed">
-            {t('app.version', { version: APP_COMMIT }, `Version ${APP_COMMIT}`)}
+            {t('app.version', { version: APP_COMMIT, message: APP_COMMIT_MESSAGE }, `Version ${APP_COMMIT} - ${APP_COMMIT_MESSAGE}`)}
           </Text>
         </Stack>
       </AppShell.Navbar>
@@ -722,7 +742,7 @@ export default function App() {
                 : ''}
             </Text>
             <Text c="rgba(255,255,255,0.58)" size="xs">
-              {t('app.version', { version: APP_COMMIT }, `Version ${APP_COMMIT}`)}
+              {t('app.version', { version: APP_COMMIT, message: APP_COMMIT_MESSAGE }, `Version ${APP_COMMIT} - ${APP_COMMIT_MESSAGE}`)}
             </Text>
           </div>
           <Group className="tableActions">

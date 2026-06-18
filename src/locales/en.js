@@ -1,7 +1,7 @@
 export default {
   "app.title": "Golf Cards",
   "app.language": "Language",
-  "app.version": "Version {version}",
+  "app.version": "Version {version} - {message}",
   "app.ready": "Ready",
   "app.player": "Player",
   "app.copied": "Copied",

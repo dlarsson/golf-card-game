@@ -1,7 +1,7 @@
 export default {
   "app.title": "Golfkort",
   "app.language": "Språk",
-  "app.version": "Version {version}",
+  "app.version": "Version {version} - {message}",
   "app.ready": "Redo",
   "app.player": "Spelare",
   "app.copied": "Kopierad",
