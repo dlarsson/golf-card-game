@@ -12,6 +12,7 @@ import {
   Paper,
   ScrollArea,
   SegmentedControl,
+  Select,
   Stack,
   Text,
   TextInput,
@@ -30,7 +31,8 @@ import {
   IconUsers,
 } from '@tabler/icons-react';
 import { Peer } from 'peerjs';
-import { defaultGame, gameModules } from './games';
+import { defaultGame, gameModules, getGameRules, getRegisteredGameRules } from './games';
+import { createTranslator, getInitialLanguage, languageOptions, languageStorageKey } from './i18n';
 
 const DEFAULT_PLAYER_NAME = 'Player 1';
 const APP_COMMIT = __APP_COMMIT__;
@@ -109,6 +111,7 @@ export default function App() {
   const [roundLimit, setRoundLimit] = useState(9);
   const [scoreLimit, setScoreLimit] = useState(100);
   const [playerName, setPlayerName] = useLocalStorage({ key: 'golf-player-name', defaultValue: DEFAULT_PLAYER_NAME });
+  const [language, setLanguage] = useLocalStorage({ key: languageStorageKey, defaultValue: getInitialLanguage() });
   const [rulesOpened, rulesModal] = useDisclosure(false);
   const [selectedGameModuleKey, setSelectedGameModuleKey] = useState(defaultGame.key);
   const [selectedGameKey, setSelectedGameKey] = useState('');
@@ -129,10 +132,14 @@ export default function App() {
   const DEFAULT_VARIANT = ACTIVE_GAME.defaultVariant;
   const selectedGame = GAME_VARIANTS[selectedGameKey] || null;
   const activeVariant = GAME_VARIANTS[game?.variantKey] || selectedGame || DEFAULT_VARIANT;
+  const t = useMemo(() => createTranslator(language), [language]);
+  const gameName = (gameModule) => t(`games.${gameModule.key}.name`, {}, gameModule.name);
+  const variantName = (gameModule, variant) => t(`games.${gameModule.key}.variants.${variant.key}.name`, {}, variant.name);
+  const variantSubtitle = (gameModule, variant) => t(`games.${gameModule.key}.variants.${variant.key}.subtitle`, {}, variant.subtitle);
   const currentPlayer = game?.players[game.turn];
   const activeLobbyConnections = network.connections.filter((conn) => conn.open !== false);
   const joinedPlayers = activeLobbyConnections.map((conn, index) => conn.metadata?.name || `Player ${index + 2}`);
-  const invitedBots = Array.from({ length: onlineBotCount }, (_, index) => `Computer ${index + 1}`);
+  const invitedBots = Array.from({ length: onlineBotCount }, (_, index) => `${t('table.computer', {}, 'Computer')} ${index + 1}`);
   const lobbySeatCount = joinedPlayers.length + invitedBots.length;
   const matchConfig = { roundLimit, scoreLimit };
   const localPlayerName = playerNameOrDefault(playerName);
@@ -149,15 +156,16 @@ export default function App() {
   const localPlayer = game?.players.find((player) => isLocalPlayer(player));
   const localCanAct = game?.status === 'playing' && isLocalPlayer(currentPlayer);
   const visibleDrawn = game?.drawn && (isLocalPlayer(currentPlayer) || game.status === 'complete');
-  const tableActions = ACTIVE_GAME.getTableActions(game);
+  const tableActions = ACTIVE_GAME.getTableActions(game, t);
   const turnControls = ACTIVE_GAME.getTurnControls?.(game, {
     claim: imaginaryClaim,
     isLocalPlayer,
     localCanAct,
     localPlayer,
     mode,
+    t,
   });
-  const roundBanner = ACTIVE_GAME.getRoundBanner(game, isLocalPlayer);
+  const roundBanner = ACTIVE_GAME.getRoundBanner(game, isLocalPlayer, t);
   const gameLink =
     network.role === 'host' && network.peerId
       ? `${window.location.origin}${window.location.pathname}?game=${network.peerId}&type=${ACTIVE_GAME.key}&variant=${activeVariant.key}`
@@ -181,6 +189,10 @@ export default function App() {
       setSetupVisible(false);
     }
   }, []);
+
+  useEffect(() => {
+    document.documentElement.lang = language;
+  }, [language]);
 
   useEffect(() => {
     if (!invitedGameId || autoJoinRef.current || network.role !== 'offline') return;
@@ -256,11 +268,11 @@ export default function App() {
 
   function startHostedRound() {
     if (network.role !== 'host') {
-      appendLog('Host an online game before starting the table.');
+      appendLog(t('network.hostBeforeStart', {}, 'Host an online game before starting the table.'));
       return;
     }
     lobbyOpenRef.current = false;
-    setNetwork((prev) => ({ ...prev, lobbyOpen: false, status: 'Table started. New players cannot join.' }));
+    setNetwork((prev) => ({ ...prev, lobbyOpen: false, status: t('network.tableStarted', {}, 'Table started. New players cannot join.') }));
     const activeConnections = connectionsRef.current.filter((conn) => conn.open !== false);
     const remotePlayers = activeConnections.map((conn, index) =>
       defaultPlayer(conn.metadata?.name, conn.peer, 'remote', `Player ${index + 2}`),
@@ -286,21 +298,21 @@ export default function App() {
     const peer = new Peer();
     peerRef.current = peer;
     lobbyOpenRef.current = true;
-    setNetwork({ role: 'host', peerId: '', connections: [], status: 'Opening host table...', lobbyOpen: true });
-    peer.on('open', (id) => setNetwork((prev) => ({ ...prev, peerId: id, status: 'Host table is open. Share the game link.' })));
+    setNetwork({ role: 'host', peerId: '', connections: [], status: t('network.opening', {}, 'Opening host table...'), lobbyOpen: true });
+    peer.on('open', (id) => setNetwork((prev) => ({ ...prev, peerId: id, status: t('network.hostOpen', {}, 'Host table is open. Share the game link.') })));
     peer.on('connection', (conn) => {
       conn.on('open', () => {
         if (!lobbyOpenRef.current) {
-          conn.send({ type: 'rejected', reason: 'This table has already started.' });
+          conn.send({ type: 'rejected', reason: t('network.alreadyStarted', {}, 'This table has already started.') });
           conn.close();
-          setNetwork((prev) => ({ ...prev, status: 'A player tried to join after the table started.' }));
+          setNetwork((prev) => ({ ...prev, status: t('network.joinAfterStart', {}, 'A player tried to join after the table started.') }));
           return;
         }
         connectionsRef.current = [...connectionsRef.current, conn];
         setNetwork((prev) => ({
           ...prev,
           connections: [...connectionsRef.current],
-          status: `${connectionsRef.current.length} player${connectionsRef.current.length === 1 ? '' : 's'} in the lobby.`,
+          status: t('network.inLobby', { count: connectionsRef.current.length, plural: connectionsRef.current.length === 1 ? '' : 's' }, `${connectionsRef.current.length} player${connectionsRef.current.length === 1 ? '' : 's'} in the lobby.`),
         }));
       });
       conn.on('data', (message) => handleRemoteMessage(conn, message));
@@ -310,8 +322,8 @@ export default function App() {
           ...prev,
           connections: connectionsRef.current,
           status: prev.lobbyOpen
-            ? `${connectionsRef.current.length} player${connectionsRef.current.length === 1 ? '' : 's'} in the lobby.`
-            : 'A player disconnected.',
+            ? t('network.inLobby', { count: connectionsRef.current.length, plural: connectionsRef.current.length === 1 ? '' : 's' }, `${connectionsRef.current.length} player${connectionsRef.current.length === 1 ? '' : 's'} in the lobby.`)
+            : t('network.disconnected', {}, 'A player disconnected.'),
         }));
       });
     });
@@ -325,19 +337,19 @@ export default function App() {
     const peer = new Peer();
     peerRef.current = peer;
     lobbyOpenRef.current = false;
-    setNetwork({ role: 'guest', peerId: '', connections: [], status: 'Connecting to host...', lobbyOpen: false });
+    setNetwork({ role: 'guest', peerId: '', connections: [], status: t('network.connecting', {}, 'Connecting to host...'), lobbyOpen: false });
     peer.on('open', (id) => {
       const conn = peer.connect(remoteId, { metadata: { name: localPlayerName } });
       connectionsRef.current = [conn];
       setNetwork((prev) => ({ ...prev, peerId: id, connections: [conn] }));
       conn.on('open', () => {
-        setNetwork((prev) => ({ ...prev, status: 'Connected. Waiting for the host to start.' }));
+        setNetwork((prev) => ({ ...prev, status: t('network.connectedWaiting', {}, 'Connected. Waiting for the host to start.') }));
         setSetupVisible(false);
         conn.send({ type: 'hello', name: localPlayerName });
       });
       conn.on('data', (message) => {
         if (message.type === 'rejected') {
-          setNetwork((prev) => ({ ...prev, status: message.reason || 'This table is no longer accepting players.' }));
+          setNetwork((prev) => ({ ...prev, status: message.reason || t('network.notAccepting', {}, 'This table is no longer accepting players.') }));
           setSetupVisible(true);
           conn.close();
           return;
@@ -357,7 +369,7 @@ export default function App() {
     peerRef.current?.destroy();
     peerRef.current = null;
     lobbyOpenRef.current = false;
-    setNetwork({ role: 'offline', peerId: '', connections: [], status: 'No online table yet.', lobbyOpen: false });
+    setNetwork({ role: 'offline', peerId: '', connections: [], status: t('network.none', {}, 'No online table yet.'), lobbyOpen: false });
   }
 
   function handleRemoteMessage(conn, message) {
@@ -366,7 +378,7 @@ export default function App() {
       setNetwork((prev) => ({
         ...prev,
         connections: [...connectionsRef.current],
-        status: `${connectionsRef.current.length} player${connectionsRef.current.length === 1 ? '' : 's'} in the lobby.`,
+        status: t('network.inLobby', { count: connectionsRef.current.length, plural: connectionsRef.current.length === 1 ? '' : 's' }, `${connectionsRef.current.length} player${connectionsRef.current.length === 1 ? '' : 's'} in the lobby.`),
       }));
     }
     if (message.type === 'action') applyAction(message.action, conn.peer);
@@ -399,57 +411,82 @@ export default function App() {
     () => ACTIVE_GAME.getStandings(game, activeVariant),
     [ACTIVE_GAME, activeVariant, game],
   );
+  const showingGameChooser = !selectedGame && !invitedGameId;
+  const rulesGameEntries = showingGameChooser
+    ? getRegisteredGameRules(gameModules, t)
+    : [
+        {
+          key: ACTIVE_GAME.key,
+          name: gameName(ACTIVE_GAME),
+          sections: getGameRules(ACTIVE_GAME, t),
+        },
+      ];
 
   const rulesModalNode = (
-    <Modal opened={rulesOpened} onClose={rulesModal.close} title={`${ACTIVE_GAME.name} rules`} size="lg" centered>
+    <Modal
+      opened={rulesOpened}
+      onClose={rulesModal.close}
+      title={rulesGameEntries.length > 1 ? t('rules.allTitle', {}, 'Game rules') : t('rules.title', { game: gameName(ACTIVE_GAME) }, `${ACTIVE_GAME.name} rules`)}
+      size="lg"
+      centered
+    >
       <Stack>
-        {ACTIVE_GAME.rules.map((rule) => (
-          <Text key={rule}>{rule}</Text>
+        {rulesGameEntries.map((gameRules, gameIndex) => (
+          <Stack key={gameRules.key} gap="sm">
+            {rulesGameEntries.length > 1 && <Title order={3}>{gameRules.name}</Title>}
+            {gameRules.sections.map((section, sectionIndex) => (
+              <Stack key={`${gameRules.key}-${section.title || sectionIndex}`} gap="xs">
+                {section.title && <Text fw={700}>{section.title}</Text>}
+                {section.items.map((rule, ruleIndex) => (
+                  <Text key={`${gameRules.key}-${sectionIndex}-${ruleIndex}`}>{rule}</Text>
+                ))}
+              </Stack>
+            ))}
+            {gameIndex < rulesGameEntries.length - 1 && <Divider />}
+          </Stack>
         ))}
-        <Stack gap="xs">
-          {Object.values(GAME_VARIANTS).map((variant) => (
-            <Paper key={variant.key} withBorder p="sm" radius="sm">
-              <Text fw={700}>{variant.name}</Text>
-              <Text size="sm" c="dimmed">
-                {variant.opening}{' '}
-                {variant.pairCancellation ? 'Same-rank pairs cancel to 0.' : `A matching column of ${variant.rows} cards cancels to 0.`}
-              </Text>
-            </Paper>
-          ))}
-        </Stack>
       </Stack>
     </Modal>
   );
 
-  if (!selectedGame && !invitedGameId) {
+  if (showingGameChooser) {
     return (
       <main className="tableShell chooserShell">
         <section className="gameChooser">
             <Group justify="space-between" align="start">
               <div>
-                <Text className="eyebrow">Choose a game</Text>
-                <Title order={1}>{ACTIVE_GAME.name}</Title>
+                <Text className="eyebrow">{t('chooser.eyebrow', {}, 'Choose a game')}</Text>
+                <Title order={1}>{gameName(ACTIVE_GAME)}</Title>
                 <Text c="rgba(255,255,255,0.78)" mt="xs">
-                  Pick a table layout, then play against computers or host an online table.
+                  {t('chooser.description', {}, 'Pick a table layout, then play against computers or host an online table.')}
                 </Text>
                 <Text size="xs" c="rgba(255,255,255,0.58)" mt={4}>
-                  Version {APP_COMMIT}
+                  {t('app.version', { version: APP_COMMIT }, `Version ${APP_COMMIT}`)}
                 </Text>
               </div>
-              <Button variant="default" leftSection={<IconQuestionMark size={18} />} onClick={rulesModal.open}>
-                Rules
-              </Button>
+              <Group align="end">
+                <Select
+                  label={t('app.language', {}, 'Language')}
+                  value={language}
+                  onChange={(value) => value && setLanguage(value)}
+                  data={languageOptions}
+                  w={150}
+                />
+                <Button variant="default" leftSection={<IconQuestionMark size={18} />} onClick={rulesModal.open}>
+                  {t('rules.button', {}, 'Rules')}
+                </Button>
+              </Group>
           </Group>
           {Object.values(gameModules).map((gameModule) => (
             <div key={gameModule.key}>
               <Title order={2} mt="xl">
-                {gameModule.name}
+                {gameName(gameModule)}
               </Title>
               <div className="choiceGrid">
                 {Object.values(gameModule.variants).map((variant) => (
                   <button key={`${gameModule.key}-${variant.key}`} className="gameChoice" onClick={() => chooseGame(variant.key, gameModule.key)}>
-                    <Text fw={800}>{variant.name}</Text>
-                    <Text size="sm">{variant.subtitle}</Text>
+                    <Text fw={800}>{variantName(gameModule, variant)}</Text>
+                    <Text size="sm">{variantSubtitle(gameModule, variant)}</Text>
                     <Badge variant="light" mt="md">
                       {variant.rows} x {variant.columns}
                     </Badge>
@@ -469,23 +506,30 @@ export default function App() {
       <AppShell.Navbar className={`sidebar ${setupVisible ? '' : 'sidebarHidden'}`}>
         <Stack gap="md">
           <Button variant="default" onClick={() => setSetupVisible(false)}>
-            Show table
+            {t('setup.showTable', {}, 'Show table')}
           </Button>
           <div>
             <Group gap="xs" align="center">
               <IconCards size={34} stroke={1.7} />
-              <Title order={1}>{ACTIVE_GAME.name}</Title>
+              <Title order={1}>{gameName(ACTIVE_GAME)}</Title>
             </Group>
             <Text c="dimmed" mt="xs">
-              {activeVariant.name} with computer opponents and PeerJS tables.
+              {variantName(ACTIVE_GAME, activeVariant)}
             </Text>
           </div>
 
+          <Select
+            label={t('app.language', {}, 'Language')}
+            value={language}
+            onChange={(value) => value && setLanguage(value)}
+            data={languageOptions}
+          />
+
           <Card withBorder>
             <Group justify="space-between" mb="sm">
-              <Title order={2}>Game</Title>
+              <Title order={2}>{t('setup.game', {}, 'Game')}</Title>
               <Button size="xs" variant="default" leftSection={<IconQuestionMark size={15} />} onClick={rulesModal.open}>
-                Rules
+                {t('rules.button', {}, 'Rules')}
               </Button>
             </Group>
             <SegmentedControl
@@ -497,7 +541,7 @@ export default function App() {
                 chooseGame(nextGame.defaultVariant.key, nextGame.key);
               }}
               data={Object.values(gameModules).map((gameModule) => ({
-                label: gameModule.name,
+                label: gameName(gameModule),
                 value: gameModule.key,
               }))}
             />
@@ -506,21 +550,21 @@ export default function App() {
               value={activeVariant.key}
               onChange={(variantKey) => chooseGame(variantKey, ACTIVE_GAME.key)}
               data={Object.values(GAME_VARIANTS).map((variant) => ({
-                label: variant.name,
+                label: variantName(ACTIVE_GAME, variant),
                 value: variant.key,
               }))}
             />
             <Text size="sm" c="dimmed" mt="sm">
-              {activeVariant.name}: {activeVariant.subtitle}
+              {variantName(ACTIVE_GAME, activeVariant)}: {variantSubtitle(ACTIVE_GAME, activeVariant)}
             </Text>
           </Card>
 
           <Card withBorder>
             <Title order={2} mb="sm">
-              Player
+              {t('setup.player', {}, 'Player')}
             </Title>
             <TextInput
-              label="Your name"
+              label={t('setup.yourName', {}, 'Your name')}
               value={playerName}
               placeholder={DEFAULT_PLAYER_NAME}
               maxLength={28}
@@ -531,18 +575,18 @@ export default function App() {
 
           <Card withBorder>
             <Title order={2} mb="sm">
-              Table
+              {t('setup.table', {}, 'Table')}
             </Title>
             <Group grow mb="md">
               <NumberInput
-                label="Rounds"
+                label={t('setup.rounds', {}, 'Rounds')}
                 min={1}
                 max={36}
                 value={roundLimit}
                 onChange={(value) => setRoundLimit(value || 9)}
               />
               <NumberInput
-                label="Score limit"
+                label={t('setup.scoreLimit', {}, 'Score limit')}
                 min={1}
                 max={500}
                 value={scoreLimit}
@@ -554,37 +598,37 @@ export default function App() {
               value={mode}
               onChange={setMode}
               data={[
-                { label: 'Computer', value: 'computer' },
-                { label: 'Online', value: 'online' },
+                { label: t('setup.computerMode', {}, 'Computer'), value: 'computer' },
+                { label: t('setup.onlineMode', {}, 'Online'), value: 'online' },
               ]}
             />
             {mode === 'computer' ? (
               <Stack mt="md">
                 <NumberInput
-                  label="Computer players"
+                  label={t('setup.computerPlayers', {}, 'Computer players')}
                   min={1}
                   max={maxComputerPlayers}
                   value={Math.min(botCount, maxComputerPlayers)}
                   onChange={(value) => setBotCount(value || 1)}
                 />
                 <Button leftSection={<IconPlayerPlay size={18} />} onClick={startComputerGame}>
-                  Start game
+                  {t('setup.startGame', {}, 'Start game')}
                 </Button>
               </Stack>
             ) : (
               <Stack mt="md">
                 <Group grow>
                   <Button leftSection={<IconDeviceGamepad2 size={18} />} onClick={hostGame}>
-                    Host game
+                    {t('setup.hostGame', {}, 'Host game')}
                   </Button>
                   <Button variant="default" leftSection={<IconLink size={18} />} onClick={joinGame}>
-                    Join
+                    {t('setup.join', {}, 'Join')}
                   </Button>
                 </Group>
-                <TextInput label="Game link or id" value={joinCode} onChange={(event) => setJoinCode(event.currentTarget.value)} />
+                <TextInput label={t('setup.gameLinkOrId', {}, 'Game link or id')} value={joinCode} onChange={(event) => setJoinCode(event.currentTarget.value)} />
                 {network.role === 'host' && (
                   <NumberInput
-                    label="Computer players"
+                    label={t('setup.computerPlayers', {}, 'Computer players')}
                     min={0}
                     max={maxOnlineBotCount}
                     value={Math.min(onlineBotCount, maxOnlineBotCount)}
@@ -597,15 +641,15 @@ export default function App() {
                   disabled={network.role !== 'host' || !network.peerId || !network.lobbyOpen || lobbySeatCount === 0}
                   onClick={startHostedRound}
                 >
-                  Start hosted table
+                  {t('setup.startHostedTable', {}, 'Start hosted table')}
                 </Button>
                 {network.role === 'host' && (
                   <Paper withBorder p="sm" radius="sm">
                     <Group justify="space-between" mb={lobbySeatCount ? 'xs' : 0}>
                       <Text size="sm" fw={700}>
-                        Lobby
+                        {t('setup.lobby', {}, 'Lobby')}
                       </Text>
-                      <Badge variant="light">{lobbySeatCount} invited</Badge>
+                      <Badge variant="light">{t('setup.invited', { count: lobbySeatCount }, `${lobbySeatCount} invited`)}</Badge>
                     </Group>
                     {lobbySeatCount ? (
                       <Stack gap={4}>
@@ -622,7 +666,7 @@ export default function App() {
                       </Stack>
                     ) : (
                       <Text size="sm" c="dimmed">
-                        Waiting for players to join.
+                        {t('setup.waitingPlayers', {}, 'Waiting for players to join.')}
                       </Text>
                     )}
                   </Paper>
@@ -630,7 +674,7 @@ export default function App() {
                 {gameLink && (
                   <Paper withBorder p="sm" radius="sm">
                     <Text size="sm" fw={700}>
-                      Invite link
+                      {t('setup.inviteLink', {}, 'Invite link')}
                     </Text>
                     <Text className="shareLink" size="xs" c="dimmed">
                       {gameLink}
@@ -638,7 +682,7 @@ export default function App() {
                     <CopyButton value={gameLink}>
                       {({ copied, copy }) => (
                         <Button mt="xs" fullWidth variant="default" leftSection={<IconCopy size={18} />} onClick={copy}>
-                          {copied ? 'Copied invite link' : 'Copy invite link'}
+                          {copied ? t('setup.copiedInviteLink', {}, 'Copied invite link') : t('setup.copyInviteLink', {}, 'Copy invite link')}
                         </Button>
                       )}
                     </CopyButton>
@@ -651,7 +695,7 @@ export default function App() {
             )}
           </Card>
           <Text size="xs" c="dimmed">
-            Version {APP_COMMIT}
+            {t('app.version', { version: APP_COMMIT }, `Version ${APP_COMMIT}`)}
           </Text>
         </Stack>
       </AppShell.Navbar>
@@ -659,32 +703,38 @@ export default function App() {
       <AppShell.Main className="tableShell">
         <Group justify="space-between" align="start" className="tableHeader">
           <div>
-            <Text className="eyebrow">Round</Text>
+            <Text className="eyebrow">{t('table.round', {}, 'Round')}</Text>
             <Title order={2}>
               {game?.match?.complete
-                ? 'Game complete'
+                ? t('table.gameComplete', {}, 'Game complete')
                 : game?.status === 'complete'
-                  ? 'Round complete'
-                  : `${currentPlayer?.name || 'Ready'} to act`}
+                  ? t('table.roundComplete', {}, 'Round complete')
+                  : t('table.toAct', { player: currentPlayer?.name || t('app.ready', {}, 'Ready') }, `${currentPlayer?.name || 'Ready'} to act`)}
             </Title>
             <Text c="rgba(255,255,255,0.74)" size="sm">
-              {activeVariant.name}
-              {game?.match ? ` · Round ${game.match.roundNumber} of ${game.match.roundLimit} · Score limit ${game.match.scoreLimit}` : ''}
+              {variantName(ACTIVE_GAME, activeVariant)}
+              {game?.match
+                ? ` · ${t(
+                    'table.roundStatus',
+                    { round: game.match.roundNumber, roundLimit: game.match.roundLimit, scoreLimit: game.match.scoreLimit },
+                    `Round ${game.match.roundNumber} of ${game.match.roundLimit} · Score limit ${game.match.scoreLimit}`,
+                  )}`
+                : ''}
             </Text>
             <Text c="rgba(255,255,255,0.58)" size="xs">
-              Version {APP_COMMIT}
+              {t('app.version', { version: APP_COMMIT }, `Version ${APP_COMMIT}`)}
             </Text>
           </div>
           <Group className="tableActions">
             {!setupVisible && (
               <Button variant="default" onClick={() => setSetupVisible(true)}>
-                Setup
+                {t('table.setup', {}, 'Setup')}
               </Button>
             )}
             <CopyButton value={gameLink}>
               {({ copied, copy }) => (
                 <Button variant="default" leftSection={<IconCopy size={18} />} disabled={!gameLink} onClick={copy}>
-                  {copied ? 'Copied' : 'Copy game link'}
+                  {copied ? t('app.copied', {}, 'Copied') : t('table.copyGameLink', {}, 'Copy game link')}
                 </Button>
               )}
             </CopyButton>
@@ -694,7 +744,7 @@ export default function App() {
               disabled={mode === 'online' && network.role === 'guest'}
               onClick={startNextRound}
             >
-              {game?.status === 'complete' && !game?.match?.complete ? 'Next round' : 'New game'}
+              {game?.status === 'complete' && !game?.match?.complete ? t('table.nextRound', {}, 'Next round') : t('table.newGame', {}, 'New game')}
             </Button>
           </Group>
         </Group>
@@ -702,9 +752,9 @@ export default function App() {
         {game && (
           <Paper className="standings" withBorder p="md">
             <Group justify="space-between" mb="xs">
-              <Text fw={800}>Match totals</Text>
+              <Text fw={800}>{t('table.matchTotals', {}, 'Match totals')}</Text>
               <Text size="sm" c="dimmed">
-                Lowest score wins
+                {t('table.lowestScoreWins', {}, 'Lowest score wins')}
               </Text>
             </Group>
             <Group className="scoreBadges" gap="sm">
@@ -733,7 +783,7 @@ export default function App() {
         )}
 
         {(tableActions.length > 0 || visibleDrawn) && (
-          <section className="drawArea" aria-label="Table actions">
+          <section className="drawArea" aria-label={t('table.actions', {}, 'Table actions')}>
             {tableActions.map((tableAction) => (
               <button
                 key={tableAction.key}
@@ -746,11 +796,11 @@ export default function App() {
             ))}
             {visibleDrawn && (
               <div className="drawnSlot">
-                <Text className="eyebrow">In hand</Text>
+                <Text className="eyebrow">{t('table.inHand', {}, 'In hand')}</Text>
                 <button
                   className="cardButton"
                   style={{ backgroundImage: `url(${ACTIVE_GAME.cardImage(game.drawn)})` }}
-                  aria-label="Drawn card"
+                  aria-label={t('table.drawnCard', {}, 'Drawn card')}
                   disabled
                 />
                 <Button
@@ -760,7 +810,7 @@ export default function App() {
                   disabled={!localCanAct || !game?.drawn}
                   onClick={() => applyAction({ type: 'discardDrawn' })}
                 >
-                  Discard
+                  {t('table.discard', {}, 'Discard')}
                 </Button>
               </div>
             )}
@@ -774,8 +824,8 @@ export default function App() {
                 <Text fw={800}>{turnControls.title}</Text>
                 <Text size="sm" c="dimmed">
                   {turnControls.type === 'claim'
-                    ? `Selected claim: ${turnControls.claimLabel}`
-                    : 'Any other player may challenge before the card is accepted.'}
+                    ? t('table.selectedClaim', { claim: turnControls.claimLabel }, `Selected claim: ${turnControls.claimLabel}`)
+                    : t('table.challengeHelp', {}, 'Any other player may challenge before the card is accepted.')}
                 </Text>
               </div>
               {turnControls.type === 'claim' && <Badge size="xl">{turnControls.claimLabel}</Badge>}
@@ -805,16 +855,16 @@ export default function App() {
                   ))}
                 </div>
                 <Button disabled={!turnControls.canClaim} onClick={() => applyAction(turnControls.claimAction)}>
-                  Play claimed card
+                  {t('table.playClaimedCard', {}, 'Play claimed card')}
                 </Button>
               </Stack>
             ) : (
               <Group>
                 <Button disabled={!turnControls.canChallenge} onClick={() => applyAction(turnControls.challengeAction)}>
-                  Challenge
+                  {t('table.challenge', {}, 'Challenge')}
                 </Button>
                 <Button variant="default" disabled={!turnControls.canAccept} onClick={() => applyAction(turnControls.acceptAction)}>
-                  No challenge
+                  {t('table.noChallenge', {}, 'No challenge')}
                 </Button>
               </Group>
             )}
@@ -823,7 +873,7 @@ export default function App() {
 
         <section className="players">
           {game?.players.map((player, playerIndex) => {
-            const playedPile = ACTIVE_GAME.getPlayedPile?.(game, player);
+            const playedPile = ACTIVE_GAME.getPlayedPile?.(game, player, t);
             const lastPlayedCard = playedPile?.cards?.at(-1);
             return (
               <Paper key={player.id} className={`playerBoard ${playerIndex === game.turn ? 'active' : ''}`} withBorder>
@@ -831,14 +881,20 @@ export default function App() {
                   <div>
                     <Group gap="xs">
                       <Title order={3}>{player.name}</Title>
-                      {isLocalPlayer(player) && <Badge color="yellow">Your hand</Badge>}
+                      {isLocalPlayer(player) && <Badge color="yellow">{t('table.yourHand', {}, 'Your hand')}</Badge>}
                     </Group>
                     <Text size="sm" c="rgba(255,255,255,0.74)">
-                      {isLocalPlayer(player) ? 'You' : player.type === 'bot' ? 'Computer' : player.type === 'remote' ? 'Remote player' : 'Opponent'}
+                      {isLocalPlayer(player)
+                        ? t('table.you', {}, 'You')
+                        : player.type === 'bot'
+                          ? t('table.computer', {}, 'Computer')
+                          : player.type === 'remote'
+                            ? t('table.remotePlayer', {}, 'Remote player')
+                            : t('table.opponent', {}, 'Opponent')}
                     </Text>
                   </div>
                   <Badge className="playerSummary" color="gray" size="lg">
-                    {ACTIVE_GAME.getPlayerSummary(player, game, activeVariant)}
+                    {ACTIVE_GAME.getPlayerSummary(player, game, activeVariant, t)}
                   </Badge>
                 </Group>
                 {playedPile && (
@@ -849,11 +905,11 @@ export default function App() {
                         <button
                           className="cardButton"
                           style={{ backgroundImage: `url(${ACTIVE_GAME.cardImage(lastPlayedCard)})` }}
-                          aria-label={`${player.name} last played card`}
+                          aria-label={t('table.lastPlayed', { player: player.name }, `${player.name} last played card`)}
                           disabled
                         />
                       ) : (
-                        <div className="emptyPlayedCard" aria-label={`${player.name} has not played a card yet`} />
+                        <div className="emptyPlayedCard" aria-label={t('table.emptyPlayed', { player: player.name }, `${player.name} has not played a card yet`)} />
                       )}
                       {playedPile.cards.length > 1 && <Badge className="playedCount">{playedPile.cards.length}</Badge>}
                     </div>
@@ -862,10 +918,10 @@ export default function App() {
                 {ACTIVE_GAME.key === 'imaginary-gurka' && (
                   <Group gap="xs" mb="sm">
                     <Badge color="red" variant="light">
-                      Successful challenges against: {player.successfulChallengesAgainst || 0}
+                      {t('table.successfulChallengesAgainst', { count: player.successfulChallengesAgainst || 0 }, `Successful challenges against: ${player.successfulChallengesAgainst || 0}`)}
                     </Badge>
                     <Badge color="orange" variant="light">
-                      Failed challenges issued: {player.failedChallengesIssued || 0}
+                      {t('table.failedChallengesIssued', { count: player.failedChallengesIssued || 0 }, `Failed challenges issued: ${player.failedChallengesIssued || 0}`)}
                     </Badge>
                   </Group>
                 )}
@@ -883,7 +939,7 @@ export default function App() {
                         className={`cardButton ${handAction.selectable ? 'selectable' : ''} ${handAction.selected ? 'selected' : ''}`}
                         style={{ backgroundImage: `url(${ACTIVE_GAME.cardImage(card, !handAction.visible)})` }}
                         disabled={!handAction.selectable}
-                        aria-label={`${player.name} card ${index + 1}`}
+                        aria-label={t('table.cardLabel', { player: player.name, number: index + 1 }, `${player.name} card ${index + 1}`)}
                         onClick={() => applyAction(handAction.action)}
                       />
                     );
@@ -896,8 +952,8 @@ export default function App() {
 
         <Card withBorder className="logPanel">
           <Group justify="space-between">
-            <Title order={2}>Table log</Title>
-            <Badge variant="light">{game?.deck.length || 0} cards left</Badge>
+            <Title order={2}>{t('table.log', {}, 'Table log')}</Title>
+            <Badge variant="light">{t('table.cardsLeft', { count: game?.deck.length || 0 }, `${game?.deck.length || 0} cards left`)}</Badge>
           </Group>
           <Divider my="sm" />
           <ScrollArea h={150}>

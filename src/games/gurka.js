@@ -1,6 +1,7 @@
 const SUITS = ['C', 'D', 'H', 'S'];
 const RANKS = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'];
 const HAND_SIZE = 5;
+const defaultT = (key, values = {}, fallback = key) => fallback;
 
 export const variants = {
   classic: {
@@ -24,6 +25,14 @@ export const rules = [
   'A 2 played to start a round is special: everyone must play their lowest card until play returns to the 2-starter, who then may choose any card.',
   'When everyone has one card left, the player with the highest remaining card loses.',
 ];
+
+export function getRules(t = defaultT) {
+  return [
+    {
+      items: rules.map((rule, index) => t(`games.gurka.rules.${index}`, {}, rule)),
+    },
+  ];
+}
 
 function cardId(rank, suit) {
   return `${rank}${suit}`;
@@ -416,33 +425,41 @@ export function getHandAction(game, player, index, context = {}) {
   };
 }
 
-export function getPlayedPile(game, player) {
+export function getPlayedPile(game, player, t = defaultT) {
   if (!game || game.gameKey !== gurkaGame.key) return null;
   return {
-    label: 'Played',
+    label: t('games.gurka.played', {}, 'Played'),
     cards: player.playedCards || [],
   };
 }
 
-export function getRoundBanner(game, isLocalPlayer) {
+export function getRoundBanner(game, isLocalPlayer, t = defaultT) {
   if (game?.status === 'swap') {
     const player = game.players.find((item) => isLocalPlayer(item));
     if (!player || player.ready) {
       return {
-        title: 'Waiting for swaps',
-        body: `Players may swap up to ${game.swapLimit} card${game.swapLimit === 1 ? '' : 's'}.`,
+        title: t('games.gurka.banner.waiting.title', {}, 'Waiting for swaps'),
+        body: t('games.gurka.banner.waiting.body', { count: game.swapLimit, plural: game.swapLimit === 1 ? '' : 's' }, `Players may swap up to ${game.swapLimit} card${game.swapLimit === 1 ? '' : 's'}.`),
       };
     }
     return {
-      title: 'Swap cards',
-      body: `Select 0-${game.swapLimit} cards to replace, then keep or swap them.`,
-      action: { label: player.selectedSwap?.length ? `Swap ${player.selectedSwap.length}` : 'Keep hand', action: { type: 'finishSwap' } },
+      title: t('games.gurka.banner.swap.title', {}, 'Swap cards'),
+      body: t('games.gurka.banner.swap.body', { count: game.swapLimit }, `Select 0-${game.swapLimit} cards to replace, then keep or swap them.`),
+      action: {
+        label: player.selectedSwap?.length
+          ? t('games.gurka.banner.swap.action', { count: player.selectedSwap.length }, `Swap ${player.selectedSwap.length}`)
+          : t('games.gurka.banner.keep.action', {}, 'Keep hand'),
+        action: { type: 'finishSwap' },
+      },
     };
   }
   if (game?.twoMode) {
     return {
-      title: 'Two is active',
-      body: game.twoStarterId === game.players[game.turn]?.id ? 'The 2-starter may now play any card.' : 'Players must play their lowest card.',
+      title: t('games.gurka.banner.two.title', {}, 'Two is active'),
+      body:
+        game.twoStarterId === game.players[game.turn]?.id
+          ? t('games.gurka.banner.two.owner', {}, 'The 2-starter may now play any card.')
+          : t('games.gurka.banner.two.others', {}, 'Players must play their lowest card.'),
     };
   }
   return null;
@@ -458,10 +475,12 @@ export function visibleScore(player, variant = defaultVariant, revealAll = false
   return scoreCards(player.cards, variant);
 }
 
-export function getPlayerSummary(player, game) {
-  const hand = player.cards?.some((card) => card.hidden) ? `${player.cards.length} cards` : `High: ${highestCard(player.cards)?.rank || '-'}`;
+export function getPlayerSummary(player, game, variant = defaultVariant, t = defaultT) {
+  const hand = player.cards?.some((card) => card.hidden)
+    ? t('games.gurka.summary.cards', { count: player.cards.length }, `${player.cards.length} cards`)
+    : t('games.gurka.summary.high', { rank: highestCard(player.cards)?.rank || '-' }, `High: ${highestCard(player.cards)?.rank || '-'}`);
   const score = game?.match?.totalScores?.[player.id] || 0;
-  return `${hand} · Losses: ${score}`;
+  return `${hand} · ${t('games.gurka.summary.losses', { count: score }, `Losses: ${score}`)}`;
 }
 
 export function getStandings(game) {
@@ -484,6 +503,7 @@ export const gurkaGame = {
   name: 'Gurka',
   maxPlayers: 10,
   rules,
+  getRules,
   variants,
   defaultVariant,
   cardImage,

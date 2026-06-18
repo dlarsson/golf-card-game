@@ -1,5 +1,6 @@
 const SUITS = ['C', 'D', 'H', 'S'];
 const RANKS = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
+const defaultT = (key, values = {}, fallback = key) => fallback;
 
 export const variants = {
   four: {
@@ -57,6 +58,29 @@ export const rules = [
   'Four-card Memory Golf uses a different score card: Jack is 0, Ace is 1, King and Queen are 10, and any same-rank pair scores 0. In that variant, two face-down cards are privately shown to their owner before play starts, discarded draws must be followed by revealing one hidden card, and face-up cards are locked.',
   "A full game is played across the configured number of rounds, or until any player reaches the configured total score limit. Round scores are added to each player's match total, and the lowest total wins.",
 ];
+
+export function getRules(t = defaultT) {
+  return [
+    {
+      items: rules.map((rule, index) => t(`games.golf.rules.${index}`, {}, rule)),
+    },
+    {
+      title: t('rules.variants', {}, 'Variants'),
+      items: Object.values(variants).map(
+        (variant) =>
+          `${t(`games.golf.variants.${variant.key}.name`, {}, variant.name)}: ${t(
+            `games.golf.variants.${variant.key}.opening`,
+            {},
+            variant.opening,
+          )} ${
+            variant.pairCancellation
+              ? t('rules.sameRankPairs', {}, 'Same-rank pairs cancel to 0.')
+              : t('rules.matchingColumn', { rows: variant.rows }, `A matching column of ${variant.rows} cards cancels to 0.`)
+          }`,
+      ),
+    },
+  ];
+}
 
 export function cardImage(card, back = false) {
   const cardName = back || !card ? 'Blue_Back' : `${card.rank}${card.suit}`;
@@ -394,12 +418,12 @@ export function getBotAction(game) {
   return { action: { type: shouldTakeDiscard ? 'drawDiscard' : 'drawDeck' }, actorId: player.id };
 }
 
-export function getTableActions(game) {
+export function getTableActions(game, t = defaultT) {
   if (!game || game.status !== 'playing') return [];
   return [
     {
       key: 'drawDeck',
-      label: 'Draw deck',
+      label: t('games.golf.actions.drawDeck', {}, 'Draw deck'),
       action: { type: 'drawDeck' },
       disabled: Boolean(game.drawn) || !canDrawFromDeck(game),
       image: cardImage(null, true),
@@ -407,7 +431,7 @@ export function getTableActions(game) {
     },
     {
       key: 'drawDiscard',
-      label: 'Draw discard',
+      label: t('games.golf.actions.drawDiscard', {}, 'Draw discard'),
       action: { type: 'drawDiscard' },
       disabled: Boolean(game.drawn) || !game.discard.length,
       image: cardImage(game.discard.at(-1)),
@@ -437,20 +461,20 @@ export function getHandAction(game, player, index, context = {}) {
   };
 }
 
-export function getRoundBanner(game, isLocalPlayer) {
+export function getRoundBanner(game, isLocalPlayer, t = defaultT) {
   if (game?.status !== 'preview') return null;
   return {
-    title: 'Memorize your shown cards',
-    body: 'Hide them when you are ready. Normal play starts after every player is ready.',
+    title: t('games.golf.banner.memorize.title', {}, 'Memorize your shown cards'),
+    body: t('games.golf.banner.memorize.body', {}, 'Hide them when you are ready. Normal play starts after every player is ready.'),
     action:
       game.players.some((player) => isLocalPlayer(player) && !player.ready)
-        ? { label: 'Hide cards and start', action: { type: 'ready' } }
+        ? { label: t('games.golf.banner.memorize.action', {}, 'Hide cards and start'), action: { type: 'ready' } }
         : null,
   };
 }
 
-export function getPlayerSummary(player, game, variant = defaultVariant) {
-  return `${game?.status === 'complete' ? 'Final' : 'Shown'}: ${visibleScore(player, variant, game?.status === 'complete')} · Total: ${
+export function getPlayerSummary(player, game, variant = defaultVariant, t = defaultT) {
+  return `${game?.status === 'complete' ? t('games.golf.summary.final', {}, 'Final') : t('games.golf.summary.shown', {}, 'Shown')}: ${visibleScore(player, variant, game?.status === 'complete')} · ${t('games.golf.summary.total', {}, 'Total')}: ${
     game?.match?.totalScores?.[player.id] || 0
   }`;
 }
@@ -470,6 +494,7 @@ export const golfGame = {
   key: 'golf',
   name: 'Golf Cards',
   rules,
+  getRules,
   variants,
   defaultVariant,
   cardImage,

@@ -2,6 +2,7 @@ const SUITS = ['C', 'D', 'H', 'S'];
 const SUIT_SYMBOLS = { C: '♣', D: '♦', H: '♥', S: '♠' };
 const RANKS = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'];
 const HAND_SIZE = 5;
+const defaultT = (key, values = {}, fallback = key) => fallback;
 
 export const variants = {
   imaginary: {
@@ -24,6 +25,14 @@ export const rules = [
   'The app tracks accepted cards as referee state, shows each player’s latest accepted card, and shows how many imaginary cards remain in each hand.',
   'When everyone has played their last imaginary card, the player with the highest latest accepted card loses the round.',
 ];
+
+export function getRules(t = defaultT) {
+  return [
+    {
+      items: rules.map((rule, index) => t(`games.imaginary-gurka.rules.${index}`, {}, rule)),
+    },
+  ];
+}
 
 function cardId(rank, suit) {
   return `${rank}${suit}`;
@@ -282,26 +291,30 @@ export function getHandAction() {
   };
 }
 
-export function getPlayedPile(game, player) {
+export function getPlayedPile(game, player, t = defaultT) {
   if (!game || game.gameKey !== imaginaryGurkaGame.key) return null;
   return {
-    label: 'Latest card',
+    label: t('games.imaginary-gurka.latestCard', {}, 'Latest card'),
     cards: player.latestPlayedCard ? [player.latestPlayedCard] : [],
   };
 }
 
-export function getRoundBanner(game) {
+export function getRoundBanner(game, isLocalPlayer, t = defaultT) {
   if (game?.pendingClaim) {
     const player = game.players.find((item) => item.id === game.pendingClaim.playerId);
+    const card = `${game.pendingClaim.rank}${SUIT_SYMBOLS[game.pendingClaim.suit]}`;
     return {
-      title: 'Challenge window',
-      body: `${player?.name || 'Player'} claimed ${game.pendingClaim.rank}${SUIT_SYMBOLS[game.pendingClaim.suit]}. Challenge it or let it stand.`,
+      title: t('games.imaginary-gurka.banner.challenge.title', {}, 'Challenge window'),
+      body: t('games.imaginary-gurka.banner.challenge.body', { player: player?.name || t('app.player', {}, 'Player'), card }, `${player?.name || 'Player'} claimed ${card}. Challenge it or let it stand.`),
     };
   }
   if (game?.twoMode) {
     return {
-      title: 'Two is active',
-      body: game.twoStarterId === game.players[game.turn]?.id ? 'The 2-starter may now claim any card.' : 'Players must claim their lowest imaginary card.',
+      title: t('games.imaginary-gurka.banner.two.title', {}, 'Two is active'),
+      body:
+        game.twoStarterId === game.players[game.turn]?.id
+          ? t('games.imaginary-gurka.banner.two.owner', {}, 'The 2-starter may now claim any card.')
+          : t('games.imaginary-gurka.banner.two.others', {}, 'Players must claim their lowest imaginary card.'),
     };
   }
   return null;
@@ -309,6 +322,7 @@ export function getRoundBanner(game) {
 
 export function getTurnControls(game, context = {}) {
   if (!game || game.status !== 'playing') return null;
+  const t = context.t || defaultT;
   const currentPlayer = game.players[game.turn];
   const claim = context.claim || { rank: 'A', suit: 'H' };
   const claimLabel = `${claim.rank}${SUIT_SYMBOLS[claim.suit]}`;
@@ -319,7 +333,11 @@ export function getTurnControls(game, context = {}) {
     const canAccept = context.isLocalPlayer?.(challenged) || context.mode !== 'online';
     return {
       type: 'challenge',
-      title: `${challenged?.name || 'Player'} claimed ${game.pendingClaim.rank}${SUIT_SYMBOLS[game.pendingClaim.suit]}`,
+      title: t(
+        'games.imaginary-gurka.controls.claimed',
+        { player: challenged?.name || t('app.player', {}, 'Player'), card: `${game.pendingClaim.rank}${SUIT_SYMBOLS[game.pendingClaim.suit]}` },
+        `${challenged?.name || 'Player'} claimed ${game.pendingClaim.rank}${SUIT_SYMBOLS[game.pendingClaim.suit]}`,
+      ),
       canChallenge,
       canAccept,
       challengeAction: { type: 'challengeClaim' },
@@ -329,7 +347,7 @@ export function getTurnControls(game, context = {}) {
 
   return {
     type: 'claim',
-    title: `${currentPlayer?.name || 'Player'} chooses an imaginary card`,
+    title: t('games.imaginary-gurka.controls.choose', { player: currentPlayer?.name || t('app.player', {}, 'Player') }, `${currentPlayer?.name || 'Player'} chooses an imaginary card`),
     ranks: RANKS,
     suits: SUITS.map((suit) => ({ value: suit, label: SUIT_SYMBOLS[suit] })),
     claimLabel,
@@ -346,9 +364,9 @@ export function visibleScore(player) {
   return player?.cards?.length || 0;
 }
 
-export function getPlayerSummary(player, game) {
+export function getPlayerSummary(player, game, variant = defaultVariant, t = defaultT) {
   const losses = game?.match?.totalScores?.[player.id] || 0;
-  return `${player.cards?.length || 0} cards · Losses: ${losses}`;
+  return t('games.imaginary-gurka.summary', { count: player.cards?.length || 0, losses }, `${player.cards?.length || 0} cards · Losses: ${losses}`);
 }
 
 export function getStandings(game) {
@@ -371,6 +389,7 @@ export const imaginaryGurkaGame = {
   name: 'Imaginary Gurka',
   maxPlayers: 10,
   rules,
+  getRules,
   variants,
   defaultVariant,
   cardImage,
